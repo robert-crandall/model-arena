@@ -2,7 +2,14 @@ import { render } from "@solidjs/web";
 import { flush } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { ApiToken, User } from "./lib/api/client";
+import type {
+  ApiToken,
+  CodingLeaderboard,
+  Leaderboard,
+  User,
+} from "./lib/api/client";
+
+
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -44,6 +51,8 @@ describe("Model Arena SPA foundation", () => {
   let pendingTokenLoad: ((res: Response) => void) | null;
   let dropCreatedTokenResponse: boolean;
   let failLogoutStatus: boolean;
+  let leaderboardData: Leaderboard;
+  let codingLeaderboardData: CodingLeaderboard;
   let dispose: (() => void) | undefined;
 
   beforeEach(() => {
@@ -57,6 +66,25 @@ describe("Model Arena SPA foundation", () => {
     pendingTokenLoad = null;
     dropCreatedTokenResponse = false;
     failLogoutStatus = false;
+    leaderboardData = {
+      windowDays: 90,
+      totalRuns: 0,
+      models: [],
+      lensMatrix: [],
+      hostBiasMatrix: [],
+      trials: [],
+      roster: [],
+      recentRuns: [],
+    };
+    codingLeaderboardData = {
+      windowDays: 90,
+      totalRuns: 0,
+      models: [],
+      slices: [],
+      recentRuns: [],
+    };
+
+
 
     let currentTheme: "system" | "light" | "dark" = "system";
     window.appTheme = {
@@ -182,7 +210,16 @@ describe("Model Arena SPA foundation", () => {
         return new Response(null, { status: 204 });
       }
 
+      if (url.pathname === "/api/leaderboard" && method === "GET") {
+        return jsonResponse(leaderboardData);
+      }
+
+      if (url.pathname === "/api/coding-leaderboard" && method === "GET") {
+        return jsonResponse(codingLeaderboardData);
+      }
+
       return jsonResponse({ error: `unhandled ${method} ${url.pathname}` }, 404);
+
     });
   });
 
@@ -543,4 +580,212 @@ describe("Model Arena SPA foundation", () => {
       Array.from(host.querySelectorAll(".token-name")).map((el) => el.textContent),
     ).toEqual(["fresh-token"]);
   });
+
+  it("renders read-only review, tournament, coding, and trial telemetry without model-promotion buttons", async () => {
+    currentUser = {
+      id: "00000000-0000-0000-0000-000000000001",
+      email: "leo@example.com",
+      name: "Leo",
+      createdAt: "2026-04-20T00:00:00Z",
+    };
+    const sampleCard = {
+      model: "claude-opus-4.7",
+      lineage: "claude",
+      isCurrentChampion: true,
+      activeChallengerTrialId: null,
+      reviewRuns: 3,
+      soloCatches: 3,
+      sharedCatches: 2,
+      setAsideCount: 1,
+      openQuestionCount: 0,
+      approachPivots: 1,
+      precision: 0.8333,
+      soloCatchRate: 1.0,
+      plannerRuns: 1,
+      corePlanWins: 1,
+      cherryPicks: 2,
+      debiasedTournamentScore: 1.0,
+      criticRuns: 1,
+      criticAdopted: 1,
+      criticBloatDropped: 0,
+      failuresCount: 0,
+      retriedCount: 0,
+      timedRuns: 4,
+      p50DurationMs: 28000,
+      p90DurationMs: 42000,
+      avgDurationMs: 31000,
+      stragglerCount: 0,
+      stragglerRate: 0.1,
+      catchesPerMinute: 2.15,
+    };
+    leaderboardData = {
+      windowDays: 90,
+      totalRuns: 4,
+      models: [sampleCard],
+      lensMatrix: [
+        {
+          model: "claude-opus-4.7",
+          lens: "minimalist",
+          runs: 1,
+          wins: 1,
+          winRate: 1.0,
+          cherryPicks: 2,
+        },
+      ],
+      hostBiasMatrix: [
+        {
+          hostLineage: "gemini",
+          hostModel: "gemini-3.1-pro",
+          reviewerLineage: "claude",
+          reviewerModel: "claude-opus-4.7",
+          candidatesEvaluated: 6,
+          adoptedCount: 5,
+          adoptionRate: 0.8333,
+        },
+      ],
+      trials: [
+        {
+          trial: {
+            id: 7,
+            skill: "adversarial-review",
+            lineage: "gpt",
+            championModel: "gpt-5.4",
+            challengerModel: "gpt-5.5-preview",
+            swapPercent: 30,
+            targetRuns: 10,
+            completedRuns: 10,
+            allowPrDiff: true,
+            status: "active",
+            createdAt: "2026-04-20T00:00:00Z",
+            decidedAt: null,
+          },
+          champion: {
+            ...sampleCard,
+            model: "gpt-5.4",
+            lineage: "gpt",
+            precision: 0.8,
+            p50DurationMs: 45000,
+          },
+          challenger: {
+            ...sampleCard,
+            model: "gpt-5.5-preview",
+            lineage: "gpt",
+            precision: 0.9,
+            p50DurationMs: 22000,
+          },
+          p50DeltaMs: -23000,
+          speedupRatio: 2.045,
+          verdictHint: "promote_challenger",
+          verdictNotes:
+            "Challenger leads quality (+0.220 score) and is faster (p50 22000ms vs 45000ms).",
+        },
+      ],
+      roster: [
+        {
+          skill: "adversarial-review",
+          lineage: "claude",
+          championModel: "claude-opus-4.7",
+          backupModel: "claude-sonnet-4.6",
+          sortOrder: 0,
+          enabled: true,
+          updatedAt: "2026-04-20T00:00:00Z",
+        },
+      ],
+      recentRuns: [
+        {
+          id: 10,
+          runKey: "adv-run-10",
+          skill: "adversarial-review",
+          occurredAt: "2026-04-20T00:00:00Z",
+          repo: "robert-crandall/model-arena-rust",
+          machine: "mbp",
+          harness: "copilot-cli",
+          hostModel: "gemini-3.1-pro",
+          artifactKind: "pr_diff",
+          artifactRef: "PR #5",
+          approachVerdict: "sound",
+          winningRole: "",
+          legs: [],
+          candidates: [],
+        },
+      ],
+    };
+    codingLeaderboardData = {
+      windowDays: 90,
+      totalRuns: 2,
+      models: [
+        {
+          model: "claude-opus-4.7",
+          lineage: "claude",
+          totalRuns: 2,
+          mergedRuns: 2,
+          abandonedRuns: 0,
+          firstPassCleanRuns: 1,
+          firstPassCleanRate: 0.5,
+          zeroTouchRuns: 1,
+          zeroTouchRate: 0.5,
+          mergedClean24hRuns: 2,
+          mergedClean24hRate: 1.0,
+          escapedRegressions: 0,
+          escapedRegressionRate: 0,
+          avgCcrRounds: 1.5,
+          totalCcrActionable: 1,
+          totalCcrNoise: 0,
+          ccrNoiseRatio: 0,
+          avgHumanThreads: 0,
+          totalHumanThreads: 0,
+          avgRedCiPushes: 0.5,
+          avgPromptTurns: 3,
+          avgLocChurn: 120,
+          avgTestsDelta: 2,
+          p50TimeToGreenSec: 90,
+          p90TimeToGreenSec: 120,
+          p50TimeToMergeSec: 180,
+          p90TimeToMergeSec: 240,
+        },
+      ],
+      slices: [],
+      recentRuns: [],
+    };
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    dispose = render(() => <App />, host);
+
+    await waitFor(() => {
+      expect(host.textContent).toContain("claude-opus-4.7");
+      expect(host.textContent).toContain("28.0s / 42.0s");
+    });
+
+    // Switch through tabs and verify read-only views
+    const tabs = Array.from(
+      host.querySelectorAll<HTMLButtonElement>(".tab-btn"),
+    );
+    const codingTab = tabs.find((btn) =>
+      btn.textContent?.includes("Coding & PRs"),
+    )!;
+    codingTab.click();
+    flush();
+    expect(host.textContent).toContain("Single-model coding & PR profiles");
+    expect(host.textContent).toContain("3.0m / 4.0m");
+
+    const trialsTab = tabs.find((btn) =>
+      btn.textContent?.includes("Challenger Trials"),
+    )!;
+    trialsTab.click();
+    flush();
+    expect(host.textContent).toContain("gpt-5.5-preview");
+    expect(host.textContent).toContain(
+      "Challenger leads quality (+0.220 score)",
+    );
+
+    // Ensure there are no buttons to promote or retire trials in the UI
+    const allButtons = Array.from(host.querySelectorAll("button")).map((b) =>
+      (b.textContent ?? "").toLowerCase(),
+    );
+    expect(allButtons.some((label) => label.includes("promote"))).toBe(false);
+    expect(allButtons.some((label) => label.includes("retire"))).toBe(false);
+  });
+
 });
+
