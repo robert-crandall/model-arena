@@ -1,13 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::arena::types::{
-    DecideTrialInput, PanelLeg, PanelSelection, RosterEntry, RosterSlotInput,
-    SKILL_ADVERSARIAL_REVIEW, SKILL_PLAN_TOURNAMENT, SelectPanelInput, StartTrialInput,
-    TOURNAMENT_LENSES, Trial, infer_lineage, is_valid_artifact_kind, is_valid_skill,
+    DecideTrialInput, OverrideCandidateInput, OverrideCandidateResponse, PanelLeg, PanelSelection,
+    RecordRunInput, RecordedRunOutput, RosterEntry, RosterSlotInput, SKILL_ADVERSARIAL_REVIEW,
+    SKILL_PLAN_TOURNAMENT, SelectPanelInput, StartTrialInput, TOURNAMENT_LENSES, Trial,
+    VALID_APPROACH_VERDICTS, VALID_CANDIDATE_DISPOSITIONS, VALID_CANDIDATE_SEVERITIES,
+    VALID_LEG_ROLES, VALID_LEG_STATUSES, VALID_PHASES, VALID_WINNING_ROLES, derive_candidate_keys,
+    infer_lineage, is_trial_competing_role, is_valid_artifact_kind, is_valid_skill,
 };
 use crate::auth::random_hex_secret;
 use crate::routes::ApiError;
@@ -187,20 +190,20 @@ struct ChampionSlotRow {
     enabled: bool,
 }
 
-#[derive(sqlx::FromRow)]
-struct TrialRow {
-    id: i64,
-    skill: String,
-    lineage: String,
-    champion_model: String,
-    challenger_model: String,
-    target_runs: i32,
-    completed_runs: i32,
-    swap_percent: i32,
-    allow_pr_diff: bool,
-    status: String,
-    created_at: DateTime<Utc>,
-    decided_at: Option<DateTime<Utc>>,
+#[derive(sqlx::FromRow, Clone)]
+pub(crate) struct TrialRow {
+    pub id: i64,
+    pub skill: String,
+    pub lineage: String,
+    pub champion_model: String,
+    pub challenger_model: String,
+    pub target_runs: i32,
+    pub completed_runs: i32,
+    pub swap_percent: i32,
+    pub allow_pr_diff: bool,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub decided_at: Option<DateTime<Utc>>,
 }
 
 impl From<TrialRow> for Trial {
@@ -382,6 +385,46 @@ pub async fn list_trials(
     Ok(rows.into_iter().map(Trial::from).collect())
 }
 
+pub(crate) async fn count_trial_challenger_runs(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    trial: &TrialRow,
+) -> Result<i32, ApiError> {
+    sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT l.run_id)::INT
+         FROM arena_run_legs l
+         JOIN arena_runs r ON r.id = l.run_id
+         WHERE l.trial_id = $1
+           AND r.user_id = $2
+           AND r.skill = $3
+           AND l.lineage = $4
+           AND l.is_challenger = TRUE
+           AND lower(l.model) = lower($5)
+           AND (
+               ($3 = 'adversarial-review' AND l.role = 'reviewer')
+               OR ($3 = 'plan-tournament' AND l.role IN ('minimal_diff', 'clean_architecture', 'edge_cases'))
+           )
+           AND ($6 = TRUE OR r.artifact_kind <> 'pr_diff')
+           AND r.occurred_at >= $7
+           AND ($8::timestamptz IS NULL OR r.occurred_at <= $8)
+           AND l.status IN ('ok', 'retried')",
+    )
+    .bind(trial.id)
+    .bind(user_id)
+    .bind(&trial.skill)
+    .bind(&trial.lineage)
+    .bind(&trial.challenger_model)
+    .bind(trial.allow_pr_diff)
+    .bind(trial.created_at)
+    .bind(trial.decided_at)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to count trial runs");
+        ApiError::internal("database error")
+    })
+}
+
 pub async fn decide_trial(
     pool: &PgPool,
     user_id: Uuid,
@@ -476,42 +519,7 @@ pub async fn decide_trial(
 
     trial.status = status;
     trial.decided_at = decided_at;
-
-    let completed_runs: i32 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT l.run_id)::INT
-         FROM arena_run_legs l
-         JOIN arena_runs r ON r.id = l.run_id
-         WHERE l.trial_id = $1
-           AND r.user_id = $2
-           AND r.skill = $3
-           AND l.lineage = $4
-           AND l.is_challenger = TRUE
-           AND lower(l.model) = lower($5)
-           AND (
-               ($3 = 'adversarial-review' AND l.role = 'reviewer')
-               OR ($3 = 'plan-tournament' AND l.role IN ('minimal_diff', 'clean_architecture', 'edge_cases'))
-           )
-           AND ($6 = TRUE OR r.artifact_kind <> 'pr_diff')
-           AND r.occurred_at >= $7
-           AND ($8::timestamptz IS NULL OR r.occurred_at <= $8)
-           AND l.status IN ('ok', 'retried')",
-    )
-    .bind(trial_id)
-    .bind(user_id)
-    .bind(&trial.skill)
-    .bind(&trial.lineage)
-    .bind(&trial.challenger_model)
-    .bind(trial.allow_pr_diff)
-    .bind(trial.created_at)
-    .bind(trial.decided_at)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|err| {
-        tracing::error!(?err, "failed to count trial runs");
-        ApiError::internal("failed to decide trial")
-    })?;
-
-    trial.completed_runs = completed_runs;
+    trial.completed_runs = count_trial_challenger_runs(&mut tx, user_id, &trial).await?;
 
     tx.commit().await.map_err(|err| {
         tracing::error!(?err, "failed to commit trial decision");
@@ -765,4 +773,709 @@ pub async fn select_panel(
     })?;
 
     Ok(out)
+}
+
+pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Result<(), ApiError> {
+    input.run_key = input.run_key.trim().to_string();
+    input.skill = input.skill.trim().to_string();
+    if input.run_key.is_empty() {
+        return Err(ApiError::bad_request("runKey is required"));
+    }
+    if !is_valid_skill(&input.skill) {
+        return Err(ApiError::bad_request(format!(
+            "skill must be {SKILL_ADVERSARIAL_REVIEW} or {SKILL_PLAN_TOURNAMENT}"
+        )));
+    }
+
+    input.artifact_kind = input.artifact_kind.trim().to_string();
+    if input.artifact_kind.is_empty() {
+        input.artifact_kind = "other".to_string();
+    }
+    if !is_valid_artifact_kind(&input.artifact_kind) {
+        return Err(ApiError::bad_request(format!(
+            "invalid artifactKind {:?}",
+            input.artifact_kind
+        )));
+    }
+
+    input.phase = input.phase.trim().to_string();
+    if input.phase.is_empty() {
+        input.phase = "independent".to_string();
+    }
+    if !VALID_PHASES.contains(&input.phase.as_str()) {
+        return Err(ApiError::bad_request(format!(
+            "invalid phase {:?}",
+            input.phase
+        )));
+    }
+
+    input.approach_verdict = input.approach_verdict.trim().to_string();
+    if !VALID_APPROACH_VERDICTS.contains(&input.approach_verdict.as_str()) {
+        return Err(ApiError::bad_request(format!(
+            "invalid approachVerdict {:?}",
+            input.approach_verdict
+        )));
+    }
+
+    input.winning_role = input.winning_role.trim().to_string();
+    if !VALID_WINNING_ROLES.contains(&input.winning_role.as_str()) {
+        return Err(ApiError::bad_request(format!(
+            "invalid winningRole {:?}",
+            input.winning_role
+        )));
+    }
+    if input.skill == SKILL_ADVERSARIAL_REVIEW && !input.winning_role.is_empty() {
+        return Err(ApiError::bad_request(
+            "winningRole is only valid for plan-tournament runs",
+        ));
+    }
+    if input.skill == SKILL_PLAN_TOURNAMENT && !input.approach_verdict.is_empty() {
+        return Err(ApiError::bad_request(
+            "approachVerdict is only valid for adversarial-review runs",
+        ));
+    }
+
+    input.artifact_ref = input.artifact_ref.trim().to_string();
+    input.repo = input.repo.trim().to_string();
+    input.host_model = input.host_model.trim().to_string();
+    input.host_lineage = input.host_lineage.trim().to_ascii_lowercase();
+    input.harness = input.harness.trim().to_string();
+    input.machine = input.machine.trim().to_string();
+
+    if input.legs.is_empty() {
+        return Err(ApiError::bad_request(
+            "legs must contain at least one subagent leg",
+        ));
+    }
+
+    let mut seen_slots = HashSet::with_capacity(input.legs.len());
+    for leg in &mut input.legs {
+        leg.role = leg.role.trim().to_string();
+        leg.model = leg.model.trim().to_string();
+        leg.lineage = leg.lineage.trim().to_ascii_lowercase();
+        leg.status = leg.status.trim().to_string();
+        if leg.status.is_empty() {
+            leg.status = "ok".to_string();
+        }
+        if leg.slot_index < 0 {
+            return Err(ApiError::bad_request(format!(
+                "leg slotIndex must be >= 0 (got {})",
+                leg.slot_index
+            )));
+        }
+        if !seen_slots.insert(leg.slot_index) {
+            return Err(ApiError::bad_request(format!(
+                "duplicate leg slotIndex {}",
+                leg.slot_index
+            )));
+        }
+        if leg.role.is_empty() || leg.model.is_empty() {
+            return Err(ApiError::bad_request(
+                "each leg must specify role and model",
+            ));
+        }
+        if !VALID_LEG_ROLES.contains(&leg.role.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "invalid leg role {:?}",
+                leg.role
+            )));
+        }
+        if !VALID_LEG_STATUSES.contains(&leg.status.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "invalid leg status {:?}",
+                leg.status
+            )));
+        }
+        if input.skill == SKILL_ADVERSARIAL_REVIEW
+            && !matches!(leg.role.as_str(), "reviewer" | "ponytail")
+        {
+            return Err(ApiError::bad_request(format!(
+                "leg role {:?} is not valid for adversarial-review",
+                leg.role
+            )));
+        }
+        if input.skill == SKILL_PLAN_TOURNAMENT
+            && !matches!(
+                leg.role.as_str(),
+                "minimal_diff" | "clean_architecture" | "edge_cases" | "critic" | "explore_scout"
+            )
+        {
+            return Err(ApiError::bad_request(format!(
+                "leg role {:?} is not valid for plan-tournament",
+                leg.role
+            )));
+        }
+        if !(0..=86_400_000).contains(&leg.duration_ms)
+            || !(0..=1_000).contains(&leg.cherry_picks_count)
+            || !(0..=1_000).contains(&leg.critic_adopted_count)
+            || !(0..=1_000).contains(&leg.critic_bloat_dropped_count)
+        {
+            return Err(ApiError::bad_request(
+                "leg counts must be 0..=1000 and durationMs must be 0..=86400000",
+            ));
+        }
+    }
+
+    if !input.candidates.is_empty() && input.skill != SKILL_ADVERSARIAL_REVIEW {
+        return Err(ApiError::bad_request(
+            "candidates are only valid for adversarial-review runs",
+        ));
+    }
+
+    let mut reviewer_models = HashSet::new();
+    let mut has_ponytail_leg = false;
+    for leg in &input.legs {
+        match leg.role.as_str() {
+            "reviewer" => {
+                reviewer_models.insert(leg.model.to_ascii_lowercase());
+            }
+            "ponytail" => {
+                has_ponytail_leg = true;
+            }
+            _ => {}
+        }
+    }
+
+    for (idx, c) in input.candidates.iter_mut().enumerate() {
+        c.candidate_key = c.candidate_key.trim().to_string();
+        c.summary = c.summary.trim().to_string();
+        c.severity = c.severity.trim().to_string();
+        if c.severity.is_empty() {
+            c.severity = "important".to_string();
+        }
+        c.disposition = c.disposition.trim().to_string();
+        if !VALID_CANDIDATE_SEVERITIES.contains(&c.severity.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "invalid candidate severity {:?}",
+                c.severity
+            )));
+        }
+        if !VALID_CANDIDATE_DISPOSITIONS.contains(&c.disposition.as_str()) {
+            return Err(ApiError::bad_request(format!(
+                "invalid candidate disposition {:?}",
+                c.disposition
+            )));
+        }
+
+        let mut cleaned = Vec::with_capacity(c.proposing_models.len());
+        let mut seen_proposers = HashSet::with_capacity(c.proposing_models.len());
+        for m in &c.proposing_models {
+            let trimmed = m.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let lower = trimmed.to_ascii_lowercase();
+            if lower == "ponytail" {
+                if !has_ponytail_leg {
+                    return Err(ApiError::bad_request(format!(
+                        "candidate {idx} proposer {trimmed:?} requires a ponytail leg in legs"
+                    )));
+                }
+            } else if !reviewer_models.contains(&lower) {
+                return Err(ApiError::bad_request(format!(
+                    "candidate {idx} proposer {trimmed:?} does not match any reviewer leg in legs"
+                )));
+            }
+            if seen_proposers.insert(lower) {
+                cleaned.push(trimmed.to_string());
+            }
+        }
+        if cleaned.is_empty() {
+            return Err(ApiError::bad_request(format!(
+                "candidate {idx} must have at least one proposingModel"
+            )));
+        }
+        c.proposing_models = cleaned;
+    }
+
+    let derived_keys = derive_candidate_keys(&input.candidates).map_err(ApiError::bad_request)?;
+    for (c, key) in input.candidates.iter_mut().zip(derived_keys) {
+        c.candidate_key = key;
+    }
+
+    Ok(())
+}
+
+#[derive(sqlx::FromRow)]
+struct ExistingRunMetaRow {
+    id: i64,
+    skill: String,
+    occurred_at: DateTime<Utc>,
+    prev_sent_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct PreservedLegTrialRow {
+    slot_index: i32,
+    role: String,
+    lineage: String,
+    model: String,
+    is_challenger: bool,
+    trial_id: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct TrialLookupRow {
+    id: i64,
+    skill: String,
+    lineage: String,
+    champion_model: String,
+    challenger_model: String,
+    allow_pr_diff: bool,
+    created_at: DateTime<Utc>,
+    decided_at: Option<DateTime<Utc>>,
+}
+
+pub async fn record_run(
+    pool: &PgPool,
+    user_id: Uuid,
+    mut input: RecordRunInput,
+) -> Result<RecordedRunOutput, ApiError> {
+    validate_and_normalize_record_run_input(&mut input)?;
+
+    let mut tx = pool.begin().await.map_err(|err| {
+        tracing::error!(?err, "failed to begin record_run transaction");
+        ApiError::internal("database error")
+    })?;
+
+    lock_user_row(&mut tx, user_id).await?;
+
+    let roster = sqlx::query_as::<_, RosterEntry>(
+        "SELECT skill, lineage, champion_model, backup_model, sort_order, enabled, updated_at
+         FROM arena_roster
+         WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to query roster in record_run");
+        ApiError::internal("database error")
+    })?;
+
+    if input.host_lineage.is_empty() {
+        input.host_lineage = infer_lineage(&input.host_model, &roster);
+    }
+    for leg in &mut input.legs {
+        if leg.lineage.is_empty() {
+            leg.lineage = infer_lineage(&leg.model, &roster);
+        }
+    }
+
+    let existing = sqlx::query_as::<_, ExistingRunMetaRow>(
+        "SELECT id, skill, occurred_at, COALESCE(client_sent_at, recorded_at) AS prev_sent_at
+         FROM arena_runs
+         WHERE user_id = $1 AND run_key = $2
+         FOR UPDATE",
+    )
+    .bind(user_id)
+    .bind(&input.run_key)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to query existing run");
+        ApiError::internal("database error")
+    })?;
+
+    let mut affected_skills = vec![input.skill.clone()];
+    if let Some(prev) = &existing {
+        if prev.skill != input.skill {
+            affected_skills.push(prev.skill.clone());
+        }
+        if let Some(client_sent_at) = input.client_sent_at
+            && client_sent_at < prev.prev_sent_at
+        {
+            tx.commit().await.map_err(|err| {
+                tracing::error!(?err, "failed to commit out-of-order replay no-op");
+                ApiError::internal("database error")
+            })?;
+            return Ok(RecordedRunOutput {
+                run_id: prev.id,
+                run_key: input.run_key,
+                completed_trials: Vec::new(),
+                spooled: false,
+            });
+        }
+    }
+
+    let occurred_at = input
+        .occurred_at
+        .or_else(|| existing.as_ref().map(|prev| prev.occurred_at))
+        .unwrap_or_else(Utc::now);
+
+    let run_id: i64 = sqlx::query_scalar(
+        "INSERT INTO arena_runs (
+            user_id, run_key, skill, artifact_kind, artifact_ref, repo, phase,
+            host_model, host_lineage, harness, machine,
+            approach_verdict, winning_role, occurred_at, client_sent_at, recorded_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15, NOW()), NOW())
+         ON CONFLICT (user_id, run_key) DO UPDATE SET
+            skill = EXCLUDED.skill,
+            artifact_kind = EXCLUDED.artifact_kind,
+            artifact_ref = EXCLUDED.artifact_ref,
+            repo = EXCLUDED.repo,
+            phase = EXCLUDED.phase,
+            host_model = EXCLUDED.host_model,
+            host_lineage = EXCLUDED.host_lineage,
+            harness = EXCLUDED.harness,
+            machine = EXCLUDED.machine,
+            approach_verdict = EXCLUDED.approach_verdict,
+            winning_role = EXCLUDED.winning_role,
+            occurred_at = EXCLUDED.occurred_at,
+            client_sent_at = COALESCE($15, NOW()),
+            recorded_at = NOW()
+         RETURNING id",
+    )
+    .bind(user_id)
+    .bind(&input.run_key)
+    .bind(&input.skill)
+    .bind(&input.artifact_kind)
+    .bind(&input.artifact_ref)
+    .bind(&input.repo)
+    .bind(&input.phase)
+    .bind(&input.host_model)
+    .bind(&input.host_lineage)
+    .bind(&input.harness)
+    .bind(&input.machine)
+    .bind(&input.approach_verdict)
+    .bind(&input.winning_role)
+    .bind(occurred_at)
+    .bind(input.client_sent_at)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to upsert arena_runs");
+        ApiError::internal("failed to record run")
+    })?;
+
+    let open_trials = sqlx::query_as::<_, TrialRow>(
+        "SELECT
+            id, skill, lineage, champion_model, challenger_model,
+            target_runs, 0::INT AS completed_runs, swap_percent, allow_pr_diff,
+            status, created_at, decided_at
+         FROM arena_trials
+         WHERE user_id = $1 AND skill = ANY($2) AND status IN ('active', 'completed')
+         ORDER BY id ASC
+         FOR UPDATE",
+    )
+    .bind(user_id)
+    .bind(&affected_skills)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to lock open trials");
+        ApiError::internal("failed to record run")
+    })?;
+
+    let mut open_trial_by_lineage = HashMap::new();
+    for t in &open_trials {
+        if t.skill == input.skill {
+            open_trial_by_lineage.insert(t.lineage.clone(), t.clone());
+        }
+    }
+
+    let preserved_rows = sqlx::query_as::<_, PreservedLegTrialRow>(
+        "SELECT slot_index, role, lineage, model, is_challenger, trial_id
+         FROM arena_run_legs
+         WHERE run_id = $1 AND trial_id IS NOT NULL",
+    )
+    .bind(run_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to read preserved leg trials");
+        ApiError::internal("failed to record run")
+    })?;
+
+    let mut preserved_by_slot = HashMap::with_capacity(preserved_rows.len());
+    for row in preserved_rows {
+        preserved_by_slot.insert(row.slot_index, row);
+    }
+
+    sqlx::query("DELETE FROM arena_run_legs WHERE run_id = $1")
+        .bind(run_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "failed to clear old run legs");
+            ApiError::internal("failed to record run")
+        })?;
+
+    for leg in &mut input.legs {
+        if let Some(tid) = leg.trial_id {
+            if tid <= 0 {
+                return Err(ApiError::bad_request("leg trialId must be > 0"));
+            }
+            let t = sqlx::query_as::<_, TrialLookupRow>(
+                "SELECT id, skill, lineage, champion_model, challenger_model,
+                        allow_pr_diff, created_at, decided_at
+                 FROM arena_trials
+                 WHERE id = $1 AND user_id = $2",
+            )
+            .bind(tid)
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|err| {
+                tracing::error!(?err, "failed to look up leg trial");
+                ApiError::internal("database error")
+            })?
+            .ok_or_else(|| ApiError::bad_request(format!("leg trialId {tid} not found")))?;
+
+            if t.skill != input.skill {
+                return Err(ApiError::bad_request(format!(
+                    "leg trialId {} belongs to skill {:?}, not {:?}",
+                    t.id, t.skill, input.skill
+                )));
+            }
+            if !is_trial_competing_role(&input.skill, &leg.role) {
+                return Err(ApiError::bad_request(format!(
+                    "leg role {:?} cannot be attached to trial {}",
+                    leg.role, t.id
+                )));
+            }
+            if t.lineage != leg.lineage {
+                return Err(ApiError::bad_request(format!(
+                    "leg trialId {} belongs to lineage {:?}, not {:?}",
+                    t.id, t.lineage, leg.lineage
+                )));
+            }
+            if !t.allow_pr_diff && input.artifact_kind == "pr_diff" {
+                return Err(ApiError::bad_request(format!(
+                    "trial {} does not allow pr_diff runs",
+                    t.id
+                )));
+            }
+            if occurred_at < t.created_at {
+                return Err(ApiError::bad_request(format!(
+                    "run occurredAt precedes trial {} creation",
+                    t.id
+                )));
+            }
+            if let Some(decided_at) = t.decided_at
+                && occurred_at > decided_at
+            {
+                return Err(ApiError::bad_request(format!(
+                    "run occurredAt is after trial {} decision",
+                    t.id
+                )));
+            }
+            if leg.model.eq_ignore_ascii_case(&t.challenger_model) {
+                leg.is_challenger = true;
+            } else if leg.model.eq_ignore_ascii_case(&t.champion_model) {
+                leg.is_challenger = false;
+            } else {
+                return Err(ApiError::bad_request(format!(
+                    "leg model {:?} does not match champion {:?} or challenger {:?} on trial {}",
+                    leg.model, t.champion_model, t.challenger_model, t.id
+                )));
+            }
+        } else {
+            leg.is_challenger = false;
+            if is_trial_competing_role(&input.skill, &leg.role) {
+                if let Some(prev) = preserved_by_slot.get(&leg.slot_index)
+                    && prev.role == leg.role
+                    && prev.lineage == leg.lineage
+                    && prev.model.eq_ignore_ascii_case(&leg.model)
+                {
+                    leg.trial_id = Some(prev.trial_id);
+                    leg.is_challenger = prev.is_challenger;
+                }
+                if leg.trial_id.is_none()
+                    && let Some(t) = open_trial_by_lineage.get(&leg.lineage)
+                    && (t.allow_pr_diff || input.artifact_kind != "pr_diff")
+                    && occurred_at >= t.created_at
+                {
+                    if leg.model.eq_ignore_ascii_case(&t.challenger_model) {
+                        leg.trial_id = Some(t.id);
+                        leg.is_challenger = true;
+                    } else if leg.model.eq_ignore_ascii_case(&t.champion_model) {
+                        leg.trial_id = Some(t.id);
+                        leg.is_challenger = false;
+                    }
+                }
+            }
+        }
+
+        sqlx::query(
+            "INSERT INTO arena_run_legs (
+                run_id, slot_index, role, lineage, model, is_challenger, trial_id,
+                status, duration_ms, won_core_plan, cherry_picks_count,
+                critic_adopted_count, critic_bloat_dropped_count
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+        )
+        .bind(run_id)
+        .bind(leg.slot_index)
+        .bind(&leg.role)
+        .bind(&leg.lineage)
+        .bind(&leg.model)
+        .bind(leg.is_challenger)
+        .bind(leg.trial_id)
+        .bind(&leg.status)
+        .bind(leg.duration_ms)
+        .bind(leg.won_core_plan)
+        .bind(leg.cherry_picks_count)
+        .bind(leg.critic_adopted_count)
+        .bind(leg.critic_bloat_dropped_count)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "failed to insert arena_run_leg");
+            ApiError::internal("failed to record run")
+        })?;
+    }
+
+    let mut keep_keys = Vec::with_capacity(input.candidates.len());
+    for (idx, c) in input.candidates.iter().enumerate() {
+        keep_keys.push(c.candidate_key.clone());
+        sqlx::query(
+            "INSERT INTO arena_candidates (
+                run_id, candidate_index, candidate_key, summary, severity,
+                disposition, caused_approach_pivot, proposing_models
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (run_id, candidate_key) DO UPDATE SET
+                candidate_index = EXCLUDED.candidate_index,
+                summary = EXCLUDED.summary,
+                severity = EXCLUDED.severity,
+                disposition = EXCLUDED.disposition,
+                caused_approach_pivot = EXCLUDED.caused_approach_pivot,
+                proposing_models = EXCLUDED.proposing_models",
+        )
+        .bind(run_id)
+        .bind(idx as i32)
+        .bind(&c.candidate_key)
+        .bind(&c.summary)
+        .bind(&c.severity)
+        .bind(&c.disposition)
+        .bind(c.caused_approach_pivot)
+        .bind(&c.proposing_models)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "failed to upsert arena_candidate");
+            ApiError::internal("failed to record run")
+        })?;
+    }
+
+    if keep_keys.is_empty() {
+        sqlx::query("DELETE FROM arena_candidates WHERE run_id = $1")
+            .bind(run_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| {
+                tracing::error!(?err, "failed to clear arena_candidates");
+                ApiError::internal("failed to record run")
+            })?;
+    } else {
+        sqlx::query(
+            "DELETE FROM arena_candidates WHERE run_id = $1 AND NOT (candidate_key = ANY($2))",
+        )
+        .bind(run_id)
+        .bind(&keep_keys)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "failed to prune removed arena_candidates");
+            ApiError::internal("failed to record run")
+        })?;
+    }
+
+    let mut completed_trials = Vec::new();
+    for mut t in open_trials {
+        let count = count_trial_challenger_runs(&mut tx, user_id, &t).await?;
+        if t.status == "completed" && count < t.target_runs {
+            sqlx::query("UPDATE arena_trials SET status = 'active' WHERE id = $1")
+                .bind(t.id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| {
+                    tracing::error!(?err, "failed to reopen trial");
+                    ApiError::internal("failed to record run")
+                })?;
+        } else if t.status == "active" && count >= t.target_runs {
+            sqlx::query("UPDATE arena_trials SET status = 'completed' WHERE id = $1")
+                .bind(t.id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|err| {
+                    tracing::error!(?err, "failed to complete trial");
+                    ApiError::internal("failed to record run")
+                })?;
+            t.status = "completed".to_string();
+            t.completed_runs = count;
+            completed_trials.push(Trial::from(t));
+        }
+    }
+
+    tx.commit().await.map_err(|err| {
+        tracing::error!(?err, "failed to commit record_run");
+        ApiError::internal("failed to record run")
+    })?;
+
+    Ok(RecordedRunOutput {
+        run_id,
+        run_key: input.run_key,
+        completed_trials,
+        spooled: false,
+    })
+}
+
+pub async fn override_candidate(
+    pool: &PgPool,
+    user_id: Uuid,
+    candidate_id: i64,
+    input: OverrideCandidateInput,
+) -> Result<OverrideCandidateResponse, ApiError> {
+    let val = input.human_override.trim();
+    if !matches!(val, "confirmed" | "overturned" | "clear" | "") {
+        return Err(ApiError::bad_request(
+            "humanOverride must be confirmed, overturned, or clear",
+        ));
+    }
+    let stored = if val == "clear" { "" } else { val };
+    let note = input.note.trim();
+
+    let mut tx = pool.begin().await.map_err(|err| {
+        tracing::error!(?err, "failed to begin override_candidate transaction");
+        ApiError::internal("database error")
+    })?;
+
+    lock_user_row(&mut tx, user_id).await?;
+
+    let updated = sqlx::query(
+        "UPDATE arena_candidates c
+         SET human_override = $3,
+             override_note = $4
+         FROM arena_runs r
+         WHERE c.id = $1 AND c.run_id = r.id AND r.user_id = $2",
+    )
+    .bind(candidate_id)
+    .bind(user_id)
+    .bind(stored)
+    .bind(note)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to override candidate");
+        ApiError::internal("failed to override candidate")
+    })?;
+
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::not_found(format!(
+            "candidate {candidate_id} not found"
+        )));
+    }
+
+    tx.commit().await.map_err(|err| {
+        tracing::error!(?err, "failed to commit override_candidate");
+        ApiError::internal("failed to override candidate")
+    })?;
+
+    Ok(OverrideCandidateResponse {
+        id: candidate_id,
+        human_override: stored.to_string(),
+    })
 }

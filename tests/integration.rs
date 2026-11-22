@@ -1487,3 +1487,304 @@ async fn arena_roster_trials_and_panel_selection_flow() {
 
     tdb.teardown().await;
 }
+
+#[tokio::test]
+async fn arena_runs_overrides_timing_and_leaderboard_flow() {
+    let Some(tdb) = TestDb::setup().await else {
+        return;
+    };
+    let base_url = spawn_in_process_server(tdb.pool.clone(), true).await;
+
+    let client = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .expect("cookie client");
+
+    let reg = client
+        .post(format!("{base_url}/api/auth/register"))
+        .json(&json!({
+            "email": "leaderboard@example.com",
+            "password": "very-strong-passphrase",
+            "name": "Leaderboard Tester"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg.status(), StatusCode::CREATED);
+
+    let slots = json!({
+        "slots": [
+            { "lineage": "anthropic", "championModel": "claude-opus-5.5", "backupModel": "claude-sonnet-5", "sortOrder": 0, "enabled": true },
+            { "lineage": "openai", "championModel": "gpt-6.1-sol", "backupModel": "gpt-5.6-sol", "sortOrder": 1, "enabled": true },
+            { "lineage": "google", "championModel": "gemini-4-argon", "backupModel": "gemini-4-carbon", "sortOrder": 2, "enabled": true }
+        ]
+    });
+    for skill in ["adversarial-review", "plan-tournament"] {
+        let res = client
+            .put(format!("{base_url}/api/roster/{skill}"))
+            .json(&slots)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    // Start an adversarial-review Challenger trial on openai (targetRuns: 3)
+    let trial_resp: Value = client
+        .post(format!("{base_url}/api/trials"))
+        .json(&json!({
+            "skill": "adversarial-review",
+            "lineage": "openai",
+            "challengerModel": "gpt-6.2-sol",
+            "targetRuns": 3,
+            "swapPercent": 50,
+            "allowPrDiff": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let trial_id = trial_resp["id"].as_i64().unwrap();
+
+    // Record 3 champion runs (gpt-6.1-sol takes 40s, claude-opus-5.5 takes 20s)
+    // and 3 challenger runs (gpt-6.2-sol takes 20s, claude-opus-5.5 takes 30s)
+    // Both gpt-6.1-sol and gpt-6.2-sol have identical quality (1 solo adopted catch each across 3 runs).
+    for i in 1..=3 {
+        let champ_run = client
+            .post(format!("{base_url}/api/runs"))
+            .json(&json!({
+                "runKey": format!("ar_champ_{i}"),
+                "skill": "adversarial-review",
+                "artifactKind": "pr_diff",
+                "repo": "robert-crandall/model-arena-rust",
+                "hostModel": "gemini-4-argon",
+                "approachVerdict": "keep",
+                "clientSentAt": "2026-04-19T12:00:00Z",
+                "legs": [
+                    { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.1-sol", "trialId": trial_id, "status": "ok", "durationMs": 40000 },
+                    { "slotIndex": 1, "role": "reviewer", "lineage": "anthropic", "model": "claude-opus-5.5", "status": "ok", "durationMs": 20000 }
+                ],
+                "candidates": if i == 1 {
+                    json!([
+                        { "summary": "Missing transaction lock", "severity": "blocking", "disposition": "adopted", "causedApproachPivot": true, "proposingModels": ["gpt-6.1-sol"] },
+                        { "summary": "Speculative cache wrapper", "severity": "minor", "disposition": "adopted", "causedApproachPivot": false, "proposingModels": ["claude-opus-5.5"] }
+                    ])
+                } else if i == 2 {
+                    json!([
+                        { "summary": "Shared boundary check", "severity": "important", "disposition": "adopted", "causedApproachPivot": false, "proposingModels": ["gpt-6.1-sol", "claude-opus-5.5"] }
+                    ])
+                } else {
+                    json!([])
+                }
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(champ_run.status(), StatusCode::OK);
+    }
+
+    // Verify out-of-order replay (older clientSentAt) is ignored without overwriting
+    let stale_replay = client
+        .post(format!("{base_url}/api/runs"))
+        .json(&json!({
+            "runKey": "ar_champ_1",
+            "skill": "adversarial-review",
+            "artifactKind": "pr_diff",
+            "repo": "robert-crandall/model-arena-rust",
+            "hostModel": "gemini-4-argon",
+            "approachVerdict": "rethink",
+            "clientSentAt": "2026-04-19T11:00:00Z",
+            "legs": [
+                { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.1-sol", "trialId": trial_id, "status": "ok", "durationMs": 40000 }
+            ],
+            "candidates": []
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale_replay.status(), StatusCode::OK);
+
+    // Fetch leaderboard to get candidate IDs on ar_champ_1 and overturn the second candidate
+    let lb_initial: Value = client
+        .get(format!("{base_url}/api/leaderboard"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let champ_1_view = lb_initial["recentRuns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["runKey"] == "ar_champ_1")
+        .expect("ar_champ_1 in recentRuns");
+    assert_eq!(
+        champ_1_view["approachVerdict"], "keep",
+        "stale clientSentAt replay must not overwrite newer run"
+    );
+    let second_cand_id = champ_1_view["candidates"][1]["id"].as_i64().unwrap();
+
+    let ov_res = client
+        .post(format!(
+            "{base_url}/api/candidates/{second_cand_id}/override"
+        ))
+        .json(&json!({
+            "humanOverride": "overturned",
+            "note": "False positive"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ov_res.status(), StatusCode::OK);
+
+    // Re-submit ar_champ_1 with newer clientSentAt and reversed candidate order; override must stick!
+    let reordered_update = client
+        .post(format!("{base_url}/api/runs"))
+        .json(&json!({
+            "runKey": "ar_champ_1",
+            "skill": "adversarial-review",
+            "artifactKind": "pr_diff",
+            "repo": "robert-crandall/model-arena-rust",
+            "hostModel": "gemini-4-argon",
+            "approachVerdict": "keep",
+            "clientSentAt": "2026-04-19T12:05:00Z",
+            "legs": [
+                { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.1-sol", "trialId": trial_id, "status": "ok", "durationMs": 40000 },
+                { "slotIndex": 1, "role": "reviewer", "lineage": "anthropic", "model": "claude-opus-5.5", "status": "ok", "durationMs": 20000 }
+            ],
+            "candidates": [
+                { "summary": "Speculative cache wrapper", "severity": "minor", "disposition": "adopted", "causedApproachPivot": false, "proposingModels": ["claude-opus-5.5"] },
+                { "summary": "Missing transaction lock", "severity": "blocking", "disposition": "adopted", "causedApproachPivot": true, "proposingModels": ["gpt-6.1-sol"] }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reordered_update.status(), StatusCode::OK);
+
+    // Record 3 challenger runs; the 3rd run must auto-complete the trial
+    for i in 1..=3 {
+        let chall_res = client
+            .post(format!("{base_url}/api/runs"))
+            .json(&json!({
+                "runKey": format!("ar_chall_{i}"),
+                "skill": "adversarial-review",
+                "artifactKind": "pr_diff",
+                "repo": "robert-crandall/model-arena-rust",
+                "hostModel": "gemini-4-argon",
+                "approachVerdict": "keep",
+                "legs": [
+                    { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "trialId": trial_id, "status": "ok", "durationMs": 20000 },
+                    { "slotIndex": 1, "role": "reviewer", "lineage": "anthropic", "model": "claude-opus-5.5", "status": "ok", "durationMs": 30000 }
+                ],
+                "candidates": if i == 1 {
+                    json!([
+                        { "summary": "Race condition in trial counter", "severity": "blocking", "disposition": "adopted", "causedApproachPivot": false, "proposingModels": ["gpt-6.2-sol"] }
+                    ])
+                } else {
+                    json!([])
+                }
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(chall_res.status(), StatusCode::OK);
+        let body: Value = chall_res.json().await.unwrap();
+        if i < 3 {
+            assert_eq!(body["completedTrials"].as_array().unwrap().len(), 0);
+        } else {
+            assert_eq!(body["completedTrials"].as_array().unwrap().len(), 1);
+            assert_eq!(body["completedTrials"][0]["id"], trial_id);
+            assert_eq!(body["completedTrials"][0]["status"], "completed");
+        }
+    }
+
+    // Record a plan-tournament run to exercise lensMatrix and debiasedTournamentScore
+    let pt_res = client
+        .post(format!("{base_url}/api/runs"))
+        .json(&json!({
+            "runKey": "pt_1",
+            "skill": "plan-tournament",
+            "artifactKind": "plan",
+            "repo": "robert-crandall/model-arena-rust",
+            "hostModel": "gemini-4-argon",
+            "winningRole": "minimal_diff",
+            "legs": [
+                { "slotIndex": 0, "role": "minimal_diff", "lineage": "anthropic", "model": "claude-opus-5.5", "status": "ok", "durationMs": 15000, "wonCorePlan": true, "cherryPicksCount": 1 },
+                { "slotIndex": 1, "role": "clean_architecture", "lineage": "openai", "model": "gpt-6.1-sol", "status": "ok", "durationMs": 25000, "wonCorePlan": false, "cherryPicksCount": 2 },
+                { "slotIndex": 2, "role": "edge_cases", "lineage": "google", "model": "gemini-4-argon", "status": "ok", "durationMs": 18000, "wonCorePlan": false, "cherryPicksCount": 0 }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pt_res.status(), StatusCode::OK);
+
+    // Inspect the leaderboard
+    let lb: Value = client
+        .get(format!("{base_url}/api/leaderboard?days=30"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(lb["totalRuns"], 7);
+
+    // Verify candidate override survived reordering on ar_champ_1
+    let champ_1_after = lb["recentRuns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["runKey"] == "ar_champ_1")
+        .expect("ar_champ_1");
+    assert_eq!(
+        champ_1_after["candidates"][0]["summary"],
+        "Speculative cache wrapper"
+    );
+    assert_eq!(
+        champ_1_after["candidates"][0]["humanOverride"],
+        "overturned"
+    );
+    assert_eq!(
+        champ_1_after["candidates"][0]["effectiveDisposition"],
+        "set_aside"
+    );
+
+    // Verify timing metrics (#4) on gpt-6.1-sol (3 AR runs @ 40s + 1 PT run @ 25s -> 4 timed runs, straggler in all 4)
+    let sol_61 = lb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.1-sol")
+        .expect("gpt-6.1-sol scorecard");
+    assert_eq!(sol_61["timedRuns"], 4);
+    assert_eq!(sol_61["p50DurationMs"], 40000);
+    assert_eq!(sol_61["p90DurationMs"], 40000);
+    assert_eq!(sol_61["stragglerCount"], 4);
+    assert_eq!(sol_61["stragglerRate"], 1.0);
+    assert_eq!(sol_61["soloCatches"], 1);
+    assert_eq!(sol_61["sharedCatches"], 1);
+    assert_eq!(sol_61["catchesPerMinute"], 1.0); // 2 catches across 120s (2.0 minutes) of review runs
+
+    // Verify speed-weighed Challenger trial verdict (#4): quality parity + 2.0x faster p50 -> promote
+    // Also verify cross-lineage shared catch stays shared (not inflated to solo) inside trial comparison
+    let tc = &lb["trials"][0];
+    assert_eq!(tc["trial"]["id"], trial_id);
+    assert_eq!(tc["champion"]["soloCatches"], 1);
+    assert_eq!(tc["champion"]["sharedCatches"], 1);
+    assert_eq!(tc["verdictHint"], "promote");
+    assert_eq!(tc["p50DeltaMs"], -20000);
+    assert_eq!(tc["speedupRatio"], 2.0);
+    assert!(
+        tc["verdictNotes"]
+            .as_str()
+            .unwrap()
+            .contains("faster p50 latency")
+    );
+
+    tdb.teardown().await;
+}

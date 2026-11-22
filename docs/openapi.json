@@ -240,6 +240,199 @@
         }
       }
     },
+    "/api/candidates/{id}/override": {
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "override_candidate_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Candidate ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideCandidateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated candidate override",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideCandidateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid humanOverride value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Candidate not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/leaderboard": {
+      "get": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "get_leaderboard_handler",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Lookback window in days (1..=3650, defaults to 90)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "skill",
+            "in": "query",
+            "description": "Optional filter: adversarial-review or plan-tournament",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "description": "Optional owner/repo filter",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Optional RFC3339 lower bound timestamp (overrides days)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Optional RFC3339 upper bound timestamp",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Empirical model scorecards, timing percentiles, matrices, and trial comparisons",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Leaderboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
     "/api/panel/select": {
       "post": {
         "tags": [
@@ -420,6 +613,64 @@
           },
           "409": {
             "description": "Open trial blocks changing or disabling an active champion slot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/runs": {
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "record_run_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordRunInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded skill run idempotently by runKey",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedRunOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid run payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
             "content": {
               "application/json": {
                 "schema": {
@@ -955,6 +1206,36 @@
           }
         }
       },
+      "CandidateInput": {
+        "type": "object",
+        "required": [
+          "disposition",
+          "proposingModels"
+        ],
+        "properties": {
+          "candidateKey": {
+            "type": "string"
+          },
+          "causedApproachPivot": {
+            "type": "boolean"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "proposingModels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "severity": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      },
       "CreateTokenRequest": {
         "type": "object",
         "required": [
@@ -1028,6 +1309,138 @@
           }
         }
       },
+      "HostBiasCell": {
+        "type": "object",
+        "required": [
+          "hostModel",
+          "hostLineage",
+          "reviewerModel",
+          "reviewerLineage",
+          "candidatesEvaluated",
+          "adoptedCount",
+          "adoptionRate"
+        ],
+        "properties": {
+          "adoptedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "adoptionRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "candidatesEvaluated": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "hostLineage": {
+            "type": "string"
+          },
+          "hostModel": {
+            "type": "string"
+          },
+          "reviewerLineage": {
+            "type": "string"
+          },
+          "reviewerModel": {
+            "type": "string"
+          }
+        }
+      },
+      "Leaderboard": {
+        "type": "object",
+        "required": [
+          "windowDays",
+          "totalRuns",
+          "roster",
+          "models",
+          "lensMatrix",
+          "hostBiasMatrix",
+          "trials",
+          "recentRuns"
+        ],
+        "properties": {
+          "hostBiasMatrix": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostBiasCell"
+            }
+          },
+          "lensMatrix": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LensCell"
+            }
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelScorecard"
+            }
+          },
+          "recentRuns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecentRunView"
+            }
+          },
+          "roster": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterEntry"
+            }
+          },
+          "totalRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "trials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrialComparison"
+            }
+          },
+          "windowDays": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "LensCell": {
+        "type": "object",
+        "required": [
+          "model",
+          "lens",
+          "runs",
+          "wins",
+          "winRate",
+          "cherryPicks"
+        ],
+        "properties": {
+          "cherryPicks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lens": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "winRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "wins": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "LoginRequest": {
         "type": "object",
         "required": [
@@ -1040,6 +1453,182 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "ModelScorecard": {
+        "type": "object",
+        "required": [
+          "model",
+          "lineage",
+          "isCurrentChampion",
+          "reviewRuns",
+          "soloCatches",
+          "sharedCatches",
+          "setAsideCount",
+          "openQuestionCount",
+          "approachPivots",
+          "precision",
+          "soloCatchRate",
+          "plannerRuns",
+          "corePlanWins",
+          "cherryPicks",
+          "debiasedTournamentScore",
+          "criticRuns",
+          "criticAdopted",
+          "criticBloatDropped",
+          "failuresCount",
+          "retriedCount",
+          "avgDurationMs",
+          "timedRuns",
+          "p50DurationMs",
+          "p90DurationMs",
+          "stragglerCount",
+          "stragglerRate",
+          "catchesPerMinute"
+        ],
+        "properties": {
+          "activeChallengerTrialId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "approachPivots": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "avgDurationMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "catchesPerMinute": {
+            "type": "number",
+            "format": "double"
+          },
+          "cherryPicks": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "corePlanWins": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "criticAdopted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "criticBloatDropped": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "criticRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "debiasedTournamentScore": {
+            "type": "number",
+            "format": "double"
+          },
+          "failuresCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isCurrentChampion": {
+            "type": "boolean"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "openQuestionCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "p50DurationMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "p90DurationMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "plannerRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "precision": {
+            "type": "number",
+            "format": "double"
+          },
+          "retriedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reviewRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "setAsideCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sharedCatches": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "soloCatchRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "soloCatches": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "stragglerCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "stragglerRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "timedRuns": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "OverrideCandidateInput": {
+        "type": "object",
+        "required": [
+          "humanOverride"
+        ],
+        "properties": {
+          "humanOverride": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "OverrideCandidateResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "humanOverride"
+        ],
+        "properties": {
+          "humanOverride": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -1124,6 +1713,178 @@
           },
           "skill": {
             "type": "string"
+          }
+        }
+      },
+      "RecentRunView": {
+        "type": "object",
+        "required": [
+          "id",
+          "runKey",
+          "skill",
+          "artifactKind",
+          "artifactRef",
+          "repo",
+          "hostModel",
+          "harness",
+          "machine",
+          "approachVerdict",
+          "winningRole",
+          "occurredAt",
+          "legs",
+          "candidates"
+        ],
+        "properties": {
+          "approachVerdict": {
+            "type": "string"
+          },
+          "artifactKind": {
+            "type": "string"
+          },
+          "artifactRef": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunCandidateView"
+            }
+          },
+          "harness": {
+            "type": "string"
+          },
+          "hostModel": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunLegView"
+            }
+          },
+          "machine": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "runKey": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          },
+          "winningRole": {
+            "type": "string"
+          }
+        }
+      },
+      "RecordRunInput": {
+        "type": "object",
+        "required": [
+          "runKey",
+          "skill",
+          "legs"
+        ],
+        "properties": {
+          "approachVerdict": {
+            "type": "string"
+          },
+          "artifactKind": {
+            "type": "string"
+          },
+          "artifactRef": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CandidateInput"
+            }
+          },
+          "clientSentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "hostLineage": {
+            "type": "string"
+          },
+          "hostModel": {
+            "type": "string"
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunLegInput"
+            }
+          },
+          "machine": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "queueOnly": {
+            "type": "boolean"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "runKey": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          },
+          "winningRole": {
+            "type": "string"
+          }
+        }
+      },
+      "RecordedRunOutput": {
+        "type": "object",
+        "required": [
+          "runId",
+          "runKey",
+          "completedTrials"
+        ],
+        "properties": {
+          "completedTrials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Trial"
+            }
+          },
+          "runId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "runKey": {
+            "type": "string"
+          },
+          "spooled": {
+            "type": "boolean"
           }
         }
       },
@@ -1235,6 +1996,169 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "RunCandidateView": {
+        "type": "object",
+        "required": [
+          "id",
+          "candidateIndex",
+          "summary",
+          "severity",
+          "disposition",
+          "effectiveDisposition",
+          "causedApproachPivot",
+          "proposingModels",
+          "humanOverride",
+          "overrideNote"
+        ],
+        "properties": {
+          "candidateIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "causedApproachPivot": {
+            "type": "boolean"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "effectiveDisposition": {
+            "type": "string"
+          },
+          "humanOverride": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "overrideNote": {
+            "type": "string"
+          },
+          "proposingModels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "severity": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      },
+      "RunLegInput": {
+        "type": "object",
+        "required": [
+          "slotIndex",
+          "role",
+          "model"
+        ],
+        "properties": {
+          "cherryPicksCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "criticAdoptedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "criticBloatDroppedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isChallenger": {
+            "type": "boolean"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "slotIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string"
+          },
+          "trialId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "wonCorePlan": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RunLegView": {
+        "type": "object",
+        "required": [
+          "slotIndex",
+          "role",
+          "lineage",
+          "model",
+          "isChallenger",
+          "status",
+          "durationMs",
+          "wonCorePlan",
+          "cherryPicksCount",
+          "criticAdoptedCount",
+          "criticBloatDroppedCount"
+        ],
+        "properties": {
+          "cherryPicksCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "criticAdoptedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "criticBloatDroppedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isChallenger": {
+            "type": "boolean"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "slotIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string"
+          },
+          "wonCorePlan": {
+            "type": "boolean"
           }
         }
       },
@@ -1361,6 +2285,43 @@
           "targetRuns": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "TrialComparison": {
+        "type": "object",
+        "required": [
+          "trial",
+          "champion",
+          "challenger",
+          "verdictHint",
+          "verdictNotes",
+          "p50DeltaMs",
+          "speedupRatio"
+        ],
+        "properties": {
+          "challenger": {
+            "$ref": "#/components/schemas/ModelScorecard"
+          },
+          "champion": {
+            "$ref": "#/components/schemas/ModelScorecard"
+          },
+          "p50DeltaMs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "speedupRatio": {
+            "type": "number",
+            "format": "double"
+          },
+          "trial": {
+            "$ref": "#/components/schemas/Trial"
+          },
+          "verdictHint": {
+            "type": "string"
+          },
+          "verdictNotes": {
+            "type": "string"
           }
         }
       },

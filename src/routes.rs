@@ -16,9 +16,11 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::arena::{
-    DecideTrialInput, PanelSelection, ReplaceRosterRequest, RosterListResponse, SelectPanelInput,
-    StartTrialInput, Trial, TrialsListResponse, decide_trial, list_roster, list_trials,
-    replace_roster, select_panel, start_trial,
+    DecideTrialInput, Leaderboard, LeaderboardQuery, OverrideCandidateInput,
+    OverrideCandidateResponse, PanelSelection, RecordRunInput, RecordedRunOutput,
+    ReplaceRosterRequest, RosterListResponse, SelectPanelInput, StartTrialInput, Trial,
+    TrialsListResponse, decide_trial, get_leaderboard, list_roster, list_trials,
+    override_candidate, record_run, replace_roster, select_panel, start_trial,
 };
 use crate::auth::{
     ApiToken, AuthenticatedUser, CreatedApiToken, SESSION_COOKIE_NAME, SessionUser, User,
@@ -198,6 +200,9 @@ pub fn build_openapi_router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_trials_handler, start_trial_handler))
         .routes(routes!(decide_trial_handler))
         .routes(routes!(select_panel_handler))
+        .routes(routes!(record_run_handler))
+        .routes(routes!(override_candidate_handler))
+        .routes(routes!(get_leaderboard_handler))
 }
 
 pub fn openapi_spec() -> utoipa::openapi::OpenApi {
@@ -771,4 +776,81 @@ async fn select_panel_handler(
 ) -> Result<Json<PanelSelection>, ApiError> {
     let selection = select_panel(&state.pool, user.id, payload).await?;
     Ok(Json(selection))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/runs",
+    tag = "arena",
+    request_body = RecordRunInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Recorded skill run idempotently by runKey", body = RecordedRunOutput),
+        (status = 400, description = "Invalid run payload", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn record_run_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(payload): Json<RecordRunInput>,
+) -> Result<Json<RecordedRunOutput>, ApiError> {
+    let out = record_run(&state.pool, user.id, payload).await?;
+    Ok(Json(out))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/candidates/{id}/override",
+    tag = "arena",
+    params(
+        ("id" = i64, Path, description = "Candidate ID")
+    ),
+    request_body = OverrideCandidateInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Updated candidate override", body = OverrideCandidateResponse),
+        (status = 400, description = "Invalid humanOverride value", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 404, description = "Candidate not found", body = ErrorBody)
+    )
+)]
+async fn override_candidate_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(id): Path<i64>,
+    Json(payload): Json<OverrideCandidateInput>,
+) -> Result<Json<OverrideCandidateResponse>, ApiError> {
+    let out = override_candidate(&state.pool, user.id, id, payload).await?;
+    Ok(Json(out))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/leaderboard",
+    tag = "arena",
+    params(LeaderboardQuery),
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Empirical model scorecards, timing percentiles, matrices, and trial comparisons", body = Leaderboard),
+        (status = 400, description = "Invalid filter parameters", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn get_leaderboard_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Query(query): Query<LeaderboardQuery>,
+) -> Result<Json<Leaderboard>, ApiError> {
+    let lb = get_leaderboard(&state.pool, user.id, query).await?;
+    Ok(Json(lb))
 }
