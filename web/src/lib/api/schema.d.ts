@@ -84,6 +84,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/candidates/{id}/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["override_candidate_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_leaderboard_handler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/panel/select": {
         parameters: {
             query?: never;
@@ -126,6 +158,22 @@ export interface paths {
         get?: never;
         put: operations["replace_roster_handler"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["record_run_handler"];
         delete?: never;
         options?: never;
         head?: never;
@@ -245,6 +293,14 @@ export interface components {
         AppInfo: {
             registrationOpen: boolean;
         };
+        CandidateInput: {
+            candidateKey?: string;
+            causedApproachPivot?: boolean;
+            disposition: string;
+            proposingModels: string[];
+            severity?: string;
+            summary?: string;
+        };
         CreateTokenRequest: {
             name: string;
         };
@@ -266,9 +322,109 @@ export interface components {
         HealthStatus: {
             status: string;
         };
+        HostBiasCell: {
+            /** Format: int32 */
+            adoptedCount: number;
+            /** Format: double */
+            adoptionRate: number;
+            /** Format: int32 */
+            candidatesEvaluated: number;
+            hostLineage: string;
+            hostModel: string;
+            reviewerLineage: string;
+            reviewerModel: string;
+        };
+        Leaderboard: {
+            hostBiasMatrix: components["schemas"]["HostBiasCell"][];
+            lensMatrix: components["schemas"]["LensCell"][];
+            models: components["schemas"]["ModelScorecard"][];
+            recentRuns: components["schemas"]["RecentRunView"][];
+            roster: components["schemas"]["RosterEntry"][];
+            /** Format: int32 */
+            totalRuns: number;
+            trials: components["schemas"]["TrialComparison"][];
+            /** Format: int32 */
+            windowDays: number;
+        };
+        LensCell: {
+            /** Format: int32 */
+            cherryPicks: number;
+            lens: string;
+            model: string;
+            /** Format: int32 */
+            runs: number;
+            /** Format: double */
+            winRate: number;
+            /** Format: int32 */
+            wins: number;
+        };
         LoginRequest: {
             email: string;
             password: string;
+        };
+        ModelScorecard: {
+            /** Format: int64 */
+            activeChallengerTrialId?: number | null;
+            /** Format: int32 */
+            approachPivots: number;
+            /** Format: int32 */
+            avgDurationMs: number;
+            /** Format: double */
+            catchesPerMinute: number;
+            /** Format: int32 */
+            cherryPicks: number;
+            /** Format: int32 */
+            corePlanWins: number;
+            /** Format: int32 */
+            criticAdopted: number;
+            /** Format: int32 */
+            criticBloatDropped: number;
+            /** Format: int32 */
+            criticRuns: number;
+            /** Format: double */
+            debiasedTournamentScore: number;
+            /** Format: int32 */
+            failuresCount: number;
+            isCurrentChampion: boolean;
+            lineage: string;
+            model: string;
+            /** Format: int32 */
+            openQuestionCount: number;
+            /** Format: int32 */
+            p50DurationMs: number;
+            /** Format: int32 */
+            p90DurationMs: number;
+            /** Format: int32 */
+            plannerRuns: number;
+            /** Format: double */
+            precision: number;
+            /** Format: int32 */
+            retriedCount: number;
+            /** Format: int32 */
+            reviewRuns: number;
+            /** Format: int32 */
+            setAsideCount: number;
+            /** Format: int32 */
+            sharedCatches: number;
+            /** Format: double */
+            soloCatchRate: number;
+            /** Format: int32 */
+            soloCatches: number;
+            /** Format: int32 */
+            stragglerCount: number;
+            /** Format: double */
+            stragglerRate: number;
+            /** Format: int32 */
+            timedRuns: number;
+        };
+        OverrideCandidateInput: {
+            humanOverride: string;
+            note?: string;
+        };
+        OverrideCandidateResponse: {
+            humanOverride: string;
+            /** Format: int64 */
+            id: number;
         };
         PanelLeg: {
             backupModel?: string;
@@ -291,6 +447,52 @@ export interface components {
             rotationTurn: number;
             runKey: string;
             skill: string;
+        };
+        RecentRunView: {
+            approachVerdict: string;
+            artifactKind: string;
+            artifactRef: string;
+            candidates: components["schemas"]["RunCandidateView"][];
+            harness: string;
+            hostModel: string;
+            /** Format: int64 */
+            id: number;
+            legs: components["schemas"]["RunLegView"][];
+            machine: string;
+            /** Format: date-time */
+            occurredAt: string;
+            repo: string;
+            runKey: string;
+            skill: string;
+            winningRole: string;
+        };
+        RecordRunInput: {
+            approachVerdict?: string;
+            artifactKind?: string;
+            artifactRef?: string;
+            candidates?: components["schemas"]["CandidateInput"][];
+            /** Format: date-time */
+            clientSentAt?: string | null;
+            harness?: string;
+            hostLineage?: string;
+            hostModel?: string;
+            legs: components["schemas"]["RunLegInput"][];
+            machine?: string;
+            /** Format: date-time */
+            occurredAt?: string | null;
+            phase?: string;
+            queueOnly?: boolean;
+            repo?: string;
+            runKey: string;
+            skill: string;
+            winningRole?: string;
+        };
+        RecordedRunOutput: {
+            completedTrials: components["schemas"]["Trial"][];
+            /** Format: int64 */
+            runId: number;
+            runKey: string;
+            spooled?: boolean;
         };
         RegisterRequest: {
             email: string;
@@ -321,6 +523,58 @@ export interface components {
             lineage: string;
             /** Format: int32 */
             sortOrder?: number;
+        };
+        RunCandidateView: {
+            /** Format: int32 */
+            candidateIndex: number;
+            causedApproachPivot: boolean;
+            disposition: string;
+            effectiveDisposition: string;
+            humanOverride: string;
+            /** Format: int64 */
+            id: number;
+            overrideNote: string;
+            proposingModels: string[];
+            severity: string;
+            summary: string;
+        };
+        RunLegInput: {
+            /** Format: int32 */
+            cherryPicksCount?: number;
+            /** Format: int32 */
+            criticAdoptedCount?: number;
+            /** Format: int32 */
+            criticBloatDroppedCount?: number;
+            /** Format: int32 */
+            durationMs?: number;
+            isChallenger?: boolean;
+            lineage?: string;
+            model: string;
+            role: string;
+            /** Format: int32 */
+            slotIndex: number;
+            status?: string;
+            /** Format: int64 */
+            trialId?: number | null;
+            wonCorePlan?: boolean;
+        };
+        RunLegView: {
+            /** Format: int32 */
+            cherryPicksCount: number;
+            /** Format: int32 */
+            criticAdoptedCount: number;
+            /** Format: int32 */
+            criticBloatDroppedCount: number;
+            /** Format: int32 */
+            durationMs: number;
+            isChallenger: boolean;
+            lineage: string;
+            model: string;
+            role: string;
+            /** Format: int32 */
+            slotIndex: number;
+            status: string;
+            wonCorePlan: boolean;
         };
         SelectPanelInput: {
             artifactKind?: string | null;
@@ -357,6 +611,17 @@ export interface components {
             swapPercent: number;
             /** Format: int32 */
             targetRuns: number;
+        };
+        TrialComparison: {
+            challenger: components["schemas"]["ModelScorecard"];
+            champion: components["schemas"]["ModelScorecard"];
+            /** Format: int32 */
+            p50DeltaMs: number;
+            /** Format: double */
+            speedupRatio: number;
+            trial: components["schemas"]["Trial"];
+            verdictHint: string;
+            verdictNotes: string;
         };
         TrialsListResponse: {
             trials: components["schemas"]["Trial"][];
@@ -583,6 +848,109 @@ export interface operations {
             };
         };
     };
+    override_candidate_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Candidate ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverrideCandidateInput"];
+            };
+        };
+        responses: {
+            /** @description Updated candidate override */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideCandidateResponse"];
+                };
+            };
+            /** @description Invalid humanOverride value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Candidate not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_leaderboard_handler: {
+        parameters: {
+            query?: {
+                /** @description Lookback window in days (1..=3650, defaults to 90) */
+                days?: number | null;
+                /** @description Optional filter: adversarial-review or plan-tournament */
+                skill?: string | null;
+                /** @description Optional owner/repo filter */
+                repo?: string | null;
+                /** @description Optional RFC3339 lower bound timestamp (overrides days) */
+                from?: string | null;
+                /** @description Optional RFC3339 upper bound timestamp */
+                to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Empirical model scorecards, timing percentiles, matrices, and trial comparisons */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Leaderboard"];
+                };
+            };
+            /** @description Invalid filter parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     select_panel_handler: {
         parameters: {
             query?: never;
@@ -711,6 +1079,48 @@ export interface operations {
             };
             /** @description Open trial blocks changing or disabling an active champion slot */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    record_run_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordRunInput"];
+            };
+        };
+        responses: {
+            /** @description Recorded skill run idempotently by runKey */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordedRunOutput"];
+                };
+            };
+            /** @description Invalid run payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 pub const SKILL_ADVERSARIAL_REVIEW: &str = "adversarial-review";
 pub const SKILL_PLAN_TOURNAMENT: &str = "plan-tournament";
@@ -14,6 +14,7 @@ pub const VALID_ARTIFACT_KINDS: [&str; 5] = ["pr_diff", "plan", "patch", "branch
 pub const VALID_PHASES: [&str; 3] = ["independent", "targeted", "follow_up"];
 pub const VALID_APPROACH_VERDICTS: [&str; 5] =
     ["", "keep", "adjust", "rethink", "insufficient_evidence"];
+pub const VALID_WINNING_ROLES: [&str; 4] = ["", "minimal_diff", "clean_architecture", "edge_cases"];
 pub const VALID_LEG_ROLES: [&str; 7] = [
     "reviewer",
     "ponytail",
@@ -24,6 +25,7 @@ pub const VALID_LEG_ROLES: [&str; 7] = [
     "critic",
 ];
 pub const VALID_LEG_STATUSES: [&str; 5] = ["ok", "retried", "fallback", "timeout", "skipped"];
+pub const VALID_CANDIDATE_SEVERITIES: [&str; 3] = ["blocking", "important", "minor"];
 pub const VALID_CANDIDATE_DISPOSITIONS: [&str; 3] = ["adopted", "set_aside", "open_question"];
 pub const VALID_TASK_KINDS: [&str; 5] = ["feature", "bugfix", "refactor", "cleanup", "other"];
 pub const VALID_SIZE_BUCKETS: [&str; 3] = ["S", "M", "L"];
@@ -244,6 +246,160 @@ pub struct OverrideCandidateInput {
     pub human_override: String,
     #[serde(default)]
     pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OverrideCandidateResponse {
+    pub id: i64,
+    pub human_override: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, IntoParams, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaderboardQuery {
+    /// Lookback window in days (1..=3650, defaults to 90)
+    pub days: Option<i32>,
+    /// Optional filter: adversarial-review or plan-tournament
+    pub skill: Option<String>,
+    /// Optional owner/repo filter
+    pub repo: Option<String>,
+    /// Optional RFC3339 lower bound timestamp (overrides days)
+    pub from: Option<DateTime<Utc>>,
+    /// Optional RFC3339 upper bound timestamp
+    pub to: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelScorecard {
+    pub model: String,
+    pub lineage: String,
+    pub is_current_champion: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_challenger_trial_id: Option<i64>,
+    pub review_runs: i32,
+    pub solo_catches: i32,
+    pub shared_catches: i32,
+    pub set_aside_count: i32,
+    pub open_question_count: i32,
+    pub approach_pivots: i32,
+    pub precision: f64,
+    pub solo_catch_rate: f64,
+    pub planner_runs: i32,
+    pub core_plan_wins: i32,
+    pub cherry_picks: i32,
+    pub debiased_tournament_score: f64,
+    pub critic_runs: i32,
+    pub critic_adopted: i32,
+    pub critic_bloat_dropped: i32,
+    pub failures_count: i32,
+    pub retried_count: i32,
+    pub avg_duration_ms: i32,
+    pub timed_runs: i32,
+    pub p50_duration_ms: i32,
+    pub p90_duration_ms: i32,
+    pub straggler_count: i32,
+    pub straggler_rate: f64,
+    pub catches_per_minute: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LensCell {
+    pub model: String,
+    pub lens: String,
+    pub runs: i32,
+    pub wins: i32,
+    pub win_rate: f64,
+    pub cherry_picks: i32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HostBiasCell {
+    pub host_model: String,
+    pub host_lineage: String,
+    pub reviewer_model: String,
+    pub reviewer_lineage: String,
+    pub candidates_evaluated: i32,
+    pub adopted_count: i32,
+    pub adoption_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialComparison {
+    pub trial: Trial,
+    pub champion: ModelScorecard,
+    pub challenger: ModelScorecard,
+    pub verdict_hint: String,
+    pub verdict_notes: String,
+    pub p50_delta_ms: i32,
+    pub speedup_ratio: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCandidateView {
+    pub id: i64,
+    pub candidate_index: i32,
+    pub summary: String,
+    pub severity: String,
+    pub disposition: String,
+    pub effective_disposition: String,
+    pub caused_approach_pivot: bool,
+    pub proposing_models: Vec<String>,
+    pub human_override: String,
+    pub override_note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunLegView {
+    pub slot_index: i32,
+    pub role: String,
+    pub lineage: String,
+    pub model: String,
+    pub is_challenger: bool,
+    pub status: String,
+    pub duration_ms: i32,
+    pub won_core_plan: bool,
+    pub cherry_picks_count: i32,
+    pub critic_adopted_count: i32,
+    pub critic_bloat_dropped_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentRunView {
+    pub id: i64,
+    pub run_key: String,
+    pub skill: String,
+    pub artifact_kind: String,
+    pub artifact_ref: String,
+    pub repo: String,
+    pub host_model: String,
+    pub harness: String,
+    pub machine: String,
+    pub approach_verdict: String,
+    pub winning_role: String,
+    pub occurred_at: DateTime<Utc>,
+    pub legs: Vec<RunLegView>,
+    pub candidates: Vec<RunCandidateView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Leaderboard {
+    pub window_days: i32,
+    pub total_runs: i32,
+    pub roster: Vec<RosterEntry>,
+    pub models: Vec<ModelScorecard>,
+    pub lens_matrix: Vec<LensCell>,
+    pub host_bias_matrix: Vec<HostBiasCell>,
+    pub trials: Vec<TrialComparison>,
+    pub recent_runs: Vec<RecentRunView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
