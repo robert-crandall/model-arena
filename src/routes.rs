@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::{AUTHORIZATION, COOKIE, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware;
@@ -10,11 +10,16 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
-use utoipa::{Modify, OpenApi, ToSchema};
+use utoipa::{IntoParams, Modify, OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
+use crate::arena::{
+    DecideTrialInput, PanelSelection, ReplaceRosterRequest, RosterListResponse, SelectPanelInput,
+    StartTrialInput, Trial, TrialsListResponse, decide_trial, list_roster, list_trials,
+    replace_roster, select_panel, start_trial,
+};
 use crate::auth::{
     ApiToken, AuthenticatedUser, CreatedApiToken, SESSION_COOKIE_NAME, SessionUser, User,
     build_clear_session_cookie, build_session_cookie, create_session, extract_session_cookie,
@@ -171,7 +176,8 @@ impl Modify for SecurityAddon {
         (name = "system", description = "Health and bootstrap metadata"),
         (name = "auth", description = "Email + password household authentication"),
         (name = "users", description = "Household member directory"),
-        (name = "tokens", description = "Personal access tokens for local MCP clients")
+        (name = "tokens", description = "Personal access tokens for local MCP clients"),
+        (name = "arena", description = "Model Arena rosters, challenger trials, and subagent panel selection")
     )
 )]
 pub struct ApiDoc;
@@ -187,6 +193,11 @@ pub fn build_openapi_router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_users))
         .routes(routes!(list_tokens, create_token))
         .routes(routes!(delete_token))
+        .routes(routes!(list_roster_handler))
+        .routes(routes!(replace_roster_handler))
+        .routes(routes!(list_trials_handler, start_trial_handler))
+        .routes(routes!(decide_trial_handler))
+        .routes(routes!(select_panel_handler))
 }
 
 pub fn openapi_spec() -> utoipa::openapi::OpenApi {
@@ -591,4 +602,173 @@ async fn delete_token(
         return Err(ApiError::not_found("token not found"));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ListRosterQuery {
+    /// Optional filter: adversarial-review or plan-tournament
+    pub skill: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/roster",
+    tag = "arena",
+    params(ListRosterQuery),
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Configured lineage champions and backups", body = RosterListResponse),
+        (status = 400, description = "Invalid skill filter", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn list_roster_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Query(query): Query<ListRosterQuery>,
+) -> Result<Json<RosterListResponse>, ApiError> {
+    let roster = list_roster(&state.pool, user.id, query.skill.as_deref()).await?;
+    Ok(Json(RosterListResponse { roster }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/roster/{skill}",
+    tag = "arena",
+    params(
+        ("skill" = String, Path, description = "Skill whose roster slots are replaced (adversarial-review or plan-tournament)")
+    ),
+    request_body = ReplaceRosterRequest,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Updated roster for the skill", body = RosterListResponse),
+        (status = 400, description = "Invalid skill or slot payload", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 409, description = "Open trial blocks changing or disabling an active champion slot", body = ErrorBody)
+    )
+)]
+async fn replace_roster_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(skill): Path<String>,
+    Json(payload): Json<ReplaceRosterRequest>,
+) -> Result<Json<RosterListResponse>, ApiError> {
+    let roster = replace_roster(&state.pool, user.id, &skill, payload.slots).await?;
+    Ok(Json(RosterListResponse { roster }))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ListTrialsQuery {
+    /// Optional status filter: active, completed, promoted, retired
+    pub status: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/trials",
+    tag = "arena",
+    params(ListTrialsQuery),
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Challenger trials with live completed run counts", body = TrialsListResponse),
+        (status = 400, description = "Invalid status filter", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn list_trials_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Query(query): Query<ListTrialsQuery>,
+) -> Result<Json<TrialsListResponse>, ApiError> {
+    let trials = list_trials(&state.pool, user.id, query.status.as_deref()).await?;
+    Ok(Json(TrialsListResponse { trials }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/trials",
+    tag = "arena",
+    request_body = StartTrialInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Started challenger trial", body = Trial),
+        (status = 400, description = "Invalid trial parameters", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 404, description = "Lineage slot not found in roster", body = ErrorBody),
+        (status = 409, description = "Open trial already exists on this slot", body = ErrorBody)
+    )
+)]
+async fn start_trial_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(payload): Json<StartTrialInput>,
+) -> Result<Json<Trial>, ApiError> {
+    let trial = start_trial(&state.pool, user.id, payload).await?;
+    Ok(Json(trial))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/trials/{id}/decide",
+    tag = "arena",
+    params(
+        ("id" = i64, Path, description = "Trial ID")
+    ),
+    request_body = DecideTrialInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Resolved challenger trial", body = Trial),
+        (status = 400, description = "Invalid decision", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 404, description = "Trial not found", body = ErrorBody),
+        (status = 409, description = "Trial already decided or roster incumbent changed", body = ErrorBody)
+    )
+)]
+async fn decide_trial_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(id): Path<i64>,
+    Json(payload): Json<DecideTrialInput>,
+) -> Result<Json<Trial>, ApiError> {
+    let trial = decide_trial(&state.pool, user.id, id, payload).await?;
+    Ok(Json(trial))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/panel/select",
+    tag = "arena",
+    request_body = SelectPanelInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Selected subagent panel and prompt lenses", body = PanelSelection),
+        (status = 400, description = "Invalid skill or artifactKind", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn select_panel_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(payload): Json<SelectPanelInput>,
+) -> Result<Json<PanelSelection>, ApiError> {
+    let selection = select_panel(&state.pool, user.id, payload).await?;
+    Ok(Json(selection))
 }

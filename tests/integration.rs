@@ -1291,3 +1291,199 @@ async fn arena_schema_migration_enforces_constraints_and_cascades() {
 
     tdb.teardown().await;
 }
+
+#[tokio::test]
+async fn arena_roster_trials_and_panel_selection_flow() {
+    let Some(tdb) = TestDb::setup().await else {
+        return;
+    };
+    let base_url = spawn_in_process_server(tdb.pool.clone(), true).await;
+
+    let client = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .expect("cookie client");
+
+    let reg = client
+        .post(format!("{base_url}/api/auth/register"))
+        .json(&json!({
+            "email": "arena@example.com",
+            "password": "very-strong-passphrase",
+            "name": "Arena Tester"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg.status(), StatusCode::CREATED);
+
+    // Configure rosters for adversarial-review and plan-tournament
+    let slots = json!({
+        "slots": [
+            { "lineage": "anthropic", "championModel": "claude-opus-5.5", "backupModel": "claude-sonnet-5", "sortOrder": 0, "enabled": true },
+            { "lineage": "openai", "championModel": "gpt-6.1-sol", "backupModel": "gpt-5.6-sol", "sortOrder": 1, "enabled": true },
+            { "lineage": "google", "championModel": "gemini-4-argon", "backupModel": "gemini-4-carbon", "sortOrder": 2, "enabled": true }
+        ]
+    });
+
+    for skill in ["adversarial-review", "plan-tournament"] {
+        let put_res = client
+            .put(format!("{base_url}/api/roster/{skill}"))
+            .json(&slots)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(put_res.status(), StatusCode::OK);
+        let body: Value = put_res.json().await.unwrap();
+        assert_eq!(body["roster"].as_array().unwrap().len(), 3);
+    }
+
+    // Select panel for adversarial-review: pr_diff uses all 3 lineages; plan excludes host lineage
+    let ar_pr_diff: Value = client
+        .post(format!("{base_url}/api/panel/select"))
+        .json(&json!({
+            "skill": "adversarial-review",
+            "artifactKind": "pr_diff",
+            "hostModel": "claude-opus-5.5"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ar_pr_diff["configured"], true);
+    assert_eq!(ar_pr_diff["hostLineage"], "anthropic");
+    assert_eq!(ar_pr_diff["legs"].as_array().unwrap().len(), 3);
+
+    let ar_plan: Value = client
+        .post(format!("{base_url}/api/panel/select"))
+        .json(&json!({
+            "skill": "adversarial-review",
+            "artifactKind": "plan",
+            "hostModel": "claude-opus-5.5"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let plan_legs = ar_plan["legs"].as_array().unwrap();
+    assert_eq!(plan_legs.len(), 2);
+    assert!(plan_legs.iter().all(|l| l["lineage"] != "anthropic"));
+
+    // Explicit swapPercent: 0 must be rejected with 400 Bad Request
+    let zero_swap = client
+        .post(format!("{base_url}/api/trials"))
+        .json(&json!({
+            "skill": "plan-tournament",
+            "lineage": "openai",
+            "challengerModel": "gpt-6.2-sol",
+            "targetRuns": 6,
+            "swapPercent": 0
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(zero_swap.status(), StatusCode::BAD_REQUEST);
+
+    // Start a 50% swap Challenger trial in plan-tournament on openai
+    let start_res = client
+        .post(format!("{base_url}/api/trials"))
+        .json(&json!({
+            "skill": "plan-tournament",
+            "lineage": "openai",
+            "challengerModel": "gpt-6.2-sol",
+            "targetRuns": 6,
+            "swapPercent": 50,
+            "allowPrDiff": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start_res.status(), StatusCode::OK);
+    let trial: Value = start_res.json().await.unwrap();
+    let trial_id = trial["id"].as_i64().unwrap();
+    assert_eq!(trial["championModel"], "gpt-6.1-sol");
+    assert_eq!(trial["challengerModel"], "gpt-6.2-sol");
+
+    // Replacing the roster with a different openai champion while the trial is open must fail with 409
+    let conflict_roster = client
+        .put(format!("{base_url}/api/roster/plan-tournament"))
+        .json(&json!({
+            "slots": [
+                { "lineage": "anthropic", "championModel": "claude-opus-5.5", "sortOrder": 0, "enabled": true },
+                { "lineage": "openai", "championModel": "gpt-6.2-sol", "sortOrder": 1, "enabled": true },
+                { "lineage": "google", "championModel": "gemini-4-argon", "sortOrder": 2, "enabled": true }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(conflict_roster.status(), StatusCode::CONFLICT);
+
+    // Run 6 plan-tournament selections (2 full lens cycles of 3 turns) and verify the
+    // Challenger is swapped once per lens rather than phase-locking onto a single lens.
+    let mut challenger_lenses = Vec::new();
+    for expected_turn in 0..6 {
+        let sel: Value = client
+            .post(format!("{base_url}/api/panel/select"))
+            .json(&json!({
+                "skill": "plan-tournament",
+                "artifactKind": "plan"
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(sel["rotationTurn"], expected_turn);
+        for leg in sel["legs"].as_array().unwrap() {
+            if leg["lineage"] == "openai" && leg["isChallenger"] == true {
+                assert_eq!(leg["model"], "gpt-6.2-sol");
+                assert_eq!(leg["trialId"], trial_id);
+                challenger_lenses.push(leg["role"].as_str().unwrap().to_string());
+            }
+        }
+    }
+    challenger_lenses.sort();
+    assert_eq!(
+        challenger_lenses,
+        vec![
+            "clean_architecture".to_string(),
+            "edge_cases".to_string(),
+            "minimal_diff".to_string()
+        ]
+    );
+
+    // Promote the Challenger and verify old champion moves to backupModel
+    let decide_res = client
+        .post(format!("{base_url}/api/trials/{trial_id}/decide"))
+        .json(&json!({ "decision": "promote" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(decide_res.status(), StatusCode::OK);
+    let decided: Value = decide_res.json().await.unwrap();
+    assert_eq!(decided["status"], "promoted");
+
+    let updated_roster: Value = client
+        .get(format!("{base_url}/api/roster?skill=plan-tournament"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let openai_slot = updated_roster["roster"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["lineage"] == "openai")
+        .expect("openai slot");
+    assert_eq!(openai_slot["championModel"], "gpt-6.2-sol");
+    assert_eq!(openai_slot["backupModel"], "gpt-6.1-sol");
+
+    tdb.teardown().await;
+}

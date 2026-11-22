@@ -240,6 +240,205 @@
         }
       }
     },
+    "/api/panel/select": {
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "select_panel_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectPanelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Selected subagent panel and prompt lenses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PanelSelection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid skill or artifactKind",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/roster": {
+      "get": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "list_roster_handler",
+        "parameters": [
+          {
+            "name": "skill",
+            "in": "query",
+            "description": "Optional filter: adversarial-review or plan-tournament",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configured lineage champions and backups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid skill filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/roster/{skill}": {
+      "put": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "replace_roster_handler",
+        "parameters": [
+          {
+            "name": "skill",
+            "in": "path",
+            "description": "Skill whose roster slots are replaced (adversarial-review or plan-tournament)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceRosterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated roster for the skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid skill or slot payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Open trial blocks changing or disabling an active champion slot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
     "/api/tokens": {
       "get": {
         "tags": [
@@ -411,6 +610,234 @@
         ]
       }
     },
+    "/api/trials": {
+      "get": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "list_trials_handler",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Optional status filter: active, completed, promoted, retired",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Challenger trials with live completed run counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialsListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "start_trial_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartTrialInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Started challenger trial",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trial"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid trial parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lineage slot not found in roster",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Open trial already exists on this slot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/trials/{id}/decide": {
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "decide_trial_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Trial ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideTrialInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved challenger trial",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trial"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Trial not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Trial already decided or roster incumbent changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
     "/api/users": {
       "get": {
         "tags": [
@@ -568,6 +995,17 @@
           }
         }
       },
+      "DecideTrialInput": {
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string"
+          }
+        }
+      },
       "ErrorBody": {
         "type": "object",
         "required": [
@@ -605,6 +1043,90 @@
           }
         }
       },
+      "PanelLeg": {
+        "type": "object",
+        "required": [
+          "slotIndex",
+          "role",
+          "lineage",
+          "model",
+          "isChallenger"
+        ],
+        "properties": {
+          "backupModel": {
+            "type": "string"
+          },
+          "isChallenger": {
+            "type": "boolean"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "slotIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "trialId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "PanelSelection": {
+        "type": "object",
+        "required": [
+          "configured",
+          "runKey",
+          "skill",
+          "artifactKind",
+          "hostLineage",
+          "rotationTurn",
+          "legs",
+          "criticOrder"
+        ],
+        "properties": {
+          "artifactKind": {
+            "type": "string"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "criticOrder": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hostLineage": {
+            "type": "string"
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PanelLeg"
+            }
+          },
+          "rotationTurn": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "runKey": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          }
+        }
+      },
       "RegisterRequest": {
         "type": "object",
         "required": [
@@ -623,6 +1145,236 @@
           },
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "ReplaceRosterRequest": {
+        "type": "object",
+        "required": [
+          "slots"
+        ],
+        "properties": {
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterSlotInput"
+            }
+          }
+        }
+      },
+      "RosterEntry": {
+        "type": "object",
+        "required": [
+          "skill",
+          "lineage",
+          "championModel",
+          "backupModel",
+          "sortOrder",
+          "enabled",
+          "updatedAt"
+        ],
+        "properties": {
+          "backupModel": {
+            "type": "string"
+          },
+          "championModel": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RosterListResponse": {
+        "type": "object",
+        "required": [
+          "roster"
+        ],
+        "properties": {
+          "roster": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterEntry"
+            }
+          }
+        }
+      },
+      "RosterSlotInput": {
+        "type": "object",
+        "required": [
+          "lineage",
+          "championModel"
+        ],
+        "properties": {
+          "backupModel": {
+            "type": "string"
+          },
+          "championModel": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "SelectPanelInput": {
+        "type": "object",
+        "required": [
+          "skill"
+        ],
+        "properties": {
+          "artifactKind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hostLineage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hostModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skill": {
+            "type": "string"
+          }
+        }
+      },
+      "StartTrialInput": {
+        "type": "object",
+        "required": [
+          "skill",
+          "lineage",
+          "challengerModel",
+          "targetRuns"
+        ],
+        "properties": {
+          "allowPrDiff": {
+            "type": "boolean"
+          },
+          "challengerModel": {
+            "type": "string"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          },
+          "swapPercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "targetRuns": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "Trial": {
+        "type": "object",
+        "required": [
+          "id",
+          "skill",
+          "lineage",
+          "championModel",
+          "challengerModel",
+          "targetRuns",
+          "completedRuns",
+          "swapPercent",
+          "allowPrDiff",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "allowPrDiff": {
+            "type": "boolean"
+          },
+          "challengerModel": {
+            "type": "string"
+          },
+          "championModel": {
+            "type": "string"
+          },
+          "completedRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "swapPercent": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "targetRuns": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "TrialsListResponse": {
+        "type": "object",
+        "required": [
+          "trials"
+        ],
+        "properties": {
+          "trials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Trial"
+            }
           }
         }
       },
@@ -681,6 +1433,10 @@
     {
       "name": "tokens",
       "description": "Personal access tokens for local MCP clients"
+    },
+    {
+      "name": "arena",
+      "description": "Model Arena rosters, challenger trials, and subagent panel selection"
     }
   ]
 }

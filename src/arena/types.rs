@@ -59,6 +59,24 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RosterListResponse {
+    pub roster: Vec<RosterEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceRosterRequest {
+    pub slots: Vec<RosterSlotInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialsListResponse {
+    pub trials: Vec<Trial>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Trial {
     pub id: i64,
     pub skill: String,
@@ -333,6 +351,10 @@ pub struct OverrideCodingRunInput {
 
 pub fn is_valid_skill(skill: &str) -> bool {
     matches!(skill, SKILL_ADVERSARIAL_REVIEW | SKILL_PLAN_TOURNAMENT)
+}
+
+pub fn is_valid_artifact_kind(kind: &str) -> bool {
+    VALID_ARTIFACT_KINDS.contains(&kind)
 }
 
 pub fn is_trial_competing_role(skill: &str, role: &str) -> bool {

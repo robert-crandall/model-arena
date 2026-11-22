@@ -84,6 +84,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/panel/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["select_panel_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/roster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_roster_handler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/roster/{skill}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["replace_roster_handler"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tokens": {
         parameters: {
             query?: never;
@@ -111,6 +159,38 @@ export interface paths {
         put?: never;
         post?: never;
         delete: operations["delete_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_trials_handler"];
+        put?: never;
+        post: operations["start_trial_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trials/{id}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["decide_trial_handler"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -177,6 +257,9 @@ export interface components {
             name: string;
             token: string;
         };
+        DecideTrialInput: {
+            decision: string;
+        };
         ErrorBody: {
             error: string;
         };
@@ -187,10 +270,96 @@ export interface components {
             email: string;
             password: string;
         };
+        PanelLeg: {
+            backupModel?: string;
+            isChallenger: boolean;
+            lineage: string;
+            model: string;
+            role: string;
+            /** Format: int32 */
+            slotIndex: number;
+            /** Format: int64 */
+            trialId?: number | null;
+        };
+        PanelSelection: {
+            artifactKind: string;
+            configured: boolean;
+            criticOrder: string[];
+            hostLineage: string;
+            legs: components["schemas"]["PanelLeg"][];
+            /** Format: int64 */
+            rotationTurn: number;
+            runKey: string;
+            skill: string;
+        };
         RegisterRequest: {
             email: string;
             name?: string | null;
             password: string;
+        };
+        ReplaceRosterRequest: {
+            slots: components["schemas"]["RosterSlotInput"][];
+        };
+        RosterEntry: {
+            backupModel: string;
+            championModel: string;
+            enabled: boolean;
+            lineage: string;
+            skill: string;
+            /** Format: int32 */
+            sortOrder: number;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        RosterListResponse: {
+            roster: components["schemas"]["RosterEntry"][];
+        };
+        RosterSlotInput: {
+            backupModel?: string;
+            championModel: string;
+            enabled?: boolean;
+            lineage: string;
+            /** Format: int32 */
+            sortOrder?: number;
+        };
+        SelectPanelInput: {
+            artifactKind?: string | null;
+            hostLineage?: string | null;
+            hostModel?: string | null;
+            skill: string;
+        };
+        StartTrialInput: {
+            allowPrDiff?: boolean;
+            challengerModel: string;
+            lineage: string;
+            skill: string;
+            /** Format: int32 */
+            swapPercent?: number | null;
+            /** Format: int32 */
+            targetRuns: number;
+        };
+        Trial: {
+            allowPrDiff: boolean;
+            challengerModel: string;
+            championModel: string;
+            /** Format: int32 */
+            completedRuns: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            decidedAt?: string | null;
+            /** Format: int64 */
+            id: number;
+            lineage: string;
+            skill: string;
+            status: string;
+            /** Format: int32 */
+            swapPercent: number;
+            /** Format: int32 */
+            targetRuns: number;
+        };
+        TrialsListResponse: {
+            trials: components["schemas"]["Trial"][];
         };
         User: {
             /** Format: date-time */
@@ -414,6 +583,143 @@ export interface operations {
             };
         };
     };
+    select_panel_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectPanelInput"];
+            };
+        };
+        responses: {
+            /** @description Selected subagent panel and prompt lenses */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSelection"];
+                };
+            };
+            /** @description Invalid skill or artifactKind */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_roster_handler: {
+        parameters: {
+            query?: {
+                /** @description Optional filter: adversarial-review or plan-tournament */
+                skill?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configured lineage champions and backups */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RosterListResponse"];
+                };
+            };
+            /** @description Invalid skill filter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    replace_roster_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Skill whose roster slots are replaced (adversarial-review or plan-tournament) */
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceRosterRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated roster for the skill */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RosterListResponse"];
+                };
+            };
+            /** @description Invalid skill or slot payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Open trial blocks changing or disabling an active champion slot */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_tokens: {
         parameters: {
             query?: never;
@@ -542,6 +848,170 @@ export interface operations {
             };
             /** @description Token not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_trials_handler: {
+        parameters: {
+            query?: {
+                /** @description Optional status filter: active, completed, promoted, retired */
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Challenger trials with live completed run counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrialsListResponse"];
+                };
+            };
+            /** @description Invalid status filter */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    start_trial_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartTrialInput"];
+            };
+        };
+        responses: {
+            /** @description Started challenger trial */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trial"];
+                };
+            };
+            /** @description Invalid trial parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Lineage slot not found in roster */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Open trial already exists on this slot */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    decide_trial_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Trial ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecideTrialInput"];
+            };
+        };
+        responses: {
+            /** @description Resolved challenger trial */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trial"];
+                };
+            };
+            /** @description Invalid decision */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Trial not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Trial already decided or roster incumbent changed */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
