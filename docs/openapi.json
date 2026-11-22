@@ -320,6 +320,269 @@
         ]
       }
     },
+    "/api/coding-leaderboard": {
+      "get": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "get_coding_leaderboard_handler",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Lookback window in days (1..=3650, defaults to 90)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "description": "Optional owner/repo filter",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "taskKind",
+            "in": "query",
+            "description": "Optional task kind filter: feature, bugfix, refactor, cleanup, other",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "sizeBucket",
+            "in": "query",
+            "description": "Optional diff size bucket filter: S (<50 LOC), M (50..=250 LOC), L (>250 LOC)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Optional RFC3339 lower bound timestamp (overrides days)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Optional RFC3339 upper bound timestamp",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Multi-axis coding model profiles and diff-size / task-kind slice cells",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodingLeaderboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/coding-runs": {
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "record_coding_run_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodingRunInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded single-model coding run idempotently by runKey",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedCodingRunOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid coding run payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/coding-runs/{id}/override": {
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "override_coding_run_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Coding run ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideCodingRunInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated coding run override",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverrideCodingRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid humanOverride value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Coding run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
     "/api/leaderboard": {
       "get": {
         "tags": [
@@ -1236,6 +1499,494 @@
           }
         }
       },
+      "CodingLeaderboard": {
+        "type": "object",
+        "required": [
+          "windowDays",
+          "totalRuns",
+          "models",
+          "slices",
+          "recentRuns"
+        ],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodingModelProfile"
+            }
+          },
+          "recentRuns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodingRunRecord"
+            }
+          },
+          "slices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodingSliceCell"
+            }
+          },
+          "totalRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "windowDays": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CodingModelProfile": {
+        "type": "object",
+        "required": [
+          "model",
+          "lineage",
+          "totalRuns",
+          "mergedRuns",
+          "abandonedRuns",
+          "zeroTouchRuns",
+          "zeroTouchRate",
+          "firstPassCleanRuns",
+          "firstPassCleanRate",
+          "mergedClean24hRuns",
+          "mergedClean24hRate",
+          "escapedRegressions",
+          "escapedRegressionRate",
+          "avgPromptTurns",
+          "avgRedCiPushes",
+          "avgCcrRounds",
+          "totalCcrActionable",
+          "totalCcrNoise",
+          "ccrNoiseRatio",
+          "totalHumanThreads",
+          "avgHumanThreads",
+          "avgLocChurn",
+          "avgTestsDelta",
+          "p50TimeToGreenSec",
+          "p90TimeToGreenSec",
+          "p50TimeToMergeSec",
+          "p90TimeToMergeSec"
+        ],
+        "properties": {
+          "abandonedRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "avgCcrRounds": {
+            "type": "number",
+            "format": "double"
+          },
+          "avgHumanThreads": {
+            "type": "number",
+            "format": "double"
+          },
+          "avgLocChurn": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "avgPromptTurns": {
+            "type": "number",
+            "format": "double"
+          },
+          "avgRedCiPushes": {
+            "type": "number",
+            "format": "double"
+          },
+          "avgTestsDelta": {
+            "type": "number",
+            "format": "double"
+          },
+          "ccrNoiseRatio": {
+            "type": "number",
+            "format": "double"
+          },
+          "escapedRegressionRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "escapedRegressions": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "firstPassCleanRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "firstPassCleanRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "mergedClean24hRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "mergedClean24hRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mergedRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "model": {
+            "type": "string"
+          },
+          "p50TimeToGreenSec": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "p50TimeToMergeSec": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "p90TimeToGreenSec": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "p90TimeToMergeSec": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalCcrActionable": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalCcrNoise": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalHumanThreads": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalRuns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "zeroTouchRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "zeroTouchRuns": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CodingRunInput": {
+        "type": "object",
+        "required": [
+          "runKey",
+          "model"
+        ],
+        "properties": {
+          "abandoned": {
+            "type": "boolean"
+          },
+          "ccrActionableCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ccrNoiseCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ccrRounds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "clientSentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "digestSummary": {
+            "type": "string"
+          },
+          "escapedRegression": {
+            "type": "boolean"
+          },
+          "filesChanged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "firstPassClean": {
+            "type": "boolean"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "humanThreadsCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "issueRef": {
+            "type": "string"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "locAdded": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "locDeleted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mergedWithoutFollowup24h": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "prNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "promptTurnCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "queueOnly": {
+            "type": "boolean"
+          },
+          "redCiPushes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "runKey": {
+            "type": "string"
+          },
+          "taskKind": {
+            "type": "string"
+          },
+          "testsDelta": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "timeToGreenSec": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "timeToMergeSec": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CodingRunRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "runKey",
+          "model",
+          "lineage",
+          "harness",
+          "repo",
+          "prNumber",
+          "issueRef",
+          "taskKind",
+          "locAdded",
+          "locDeleted",
+          "sizeBucket",
+          "filesChanged",
+          "testsDelta",
+          "promptTurnCount",
+          "redCiPushes",
+          "ccrRounds",
+          "ccrActionableCount",
+          "ccrNoiseCount",
+          "humanThreadsCount",
+          "escapedRegression",
+          "mergedWithoutFollowup24h",
+          "firstPassClean",
+          "abandoned",
+          "timeToGreenSec",
+          "timeToMergeSec",
+          "digestSummary",
+          "humanOverride",
+          "overrideNote",
+          "occurredAt",
+          "recordedAt"
+        ],
+        "properties": {
+          "abandoned": {
+            "type": "boolean"
+          },
+          "ccrActionableCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ccrNoiseCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ccrRounds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "digestSummary": {
+            "type": "string"
+          },
+          "escapedRegression": {
+            "type": "boolean"
+          },
+          "filesChanged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "firstPassClean": {
+            "type": "boolean"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "humanOverride": {
+            "type": "string"
+          },
+          "humanThreadsCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "issueRef": {
+            "type": "string"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "locAdded": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "locDeleted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "mergedWithoutFollowup24h": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "overrideNote": {
+            "type": "string"
+          },
+          "prNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "promptTurnCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "redCiPushes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "runKey": {
+            "type": "string"
+          },
+          "sizeBucket": {
+            "type": "string"
+          },
+          "taskKind": {
+            "type": "string"
+          },
+          "testsDelta": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "timeToGreenSec": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "timeToMergeSec": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CodingSliceCell": {
+        "type": "object",
+        "required": [
+          "model",
+          "sizeBucket",
+          "taskKind",
+          "runs",
+          "zeroTouchRate",
+          "firstPassCleanRate",
+          "escapedRegressionRate",
+          "avgCcrRounds",
+          "p50TimeToMergeSec"
+        ],
+        "properties": {
+          "avgCcrRounds": {
+            "type": "number",
+            "format": "double"
+          },
+          "escapedRegressionRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "firstPassCleanRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "model": {
+            "type": "string"
+          },
+          "p50TimeToMergeSec": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sizeBucket": {
+            "type": "string"
+          },
+          "taskKind": {
+            "type": "string"
+          },
+          "zeroTouchRate": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
       "CreateTokenRequest": {
         "type": "object",
         "required": [
@@ -1632,6 +2383,37 @@
           }
         }
       },
+      "OverrideCodingRunInput": {
+        "type": "object",
+        "required": [
+          "humanOverride"
+        ],
+        "properties": {
+          "humanOverride": {
+            "type": "string",
+            "description": "Override value: `confirmed` (marks the PR outcome clean and clears `escapedRegression`),\n`overturned` (marks the PR outcome as having an escaped regression), or `clear` (resets to recorded metrics)."
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "OverrideCodingRunResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "humanOverride"
+        ],
+        "properties": {
+          "humanOverride": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "PanelLeg": {
         "type": "object",
         "required": [
@@ -1859,6 +2641,29 @@
           },
           "winningRole": {
             "type": "string"
+          }
+        }
+      },
+      "RecordedCodingRunOutput": {
+        "type": "object",
+        "required": [
+          "runId",
+          "runKey",
+          "sizeBucket"
+        ],
+        "properties": {
+          "runId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "runKey": {
+            "type": "string"
+          },
+          "sizeBucket": {
+            "type": "string"
+          },
+          "spooled": {
+            "type": "boolean"
           }
         }
       },

@@ -100,6 +100,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/coding-leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_coding_leaderboard_handler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/coding-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["record_coding_run_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/coding-runs/{id}/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["override_coding_run_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/leaderboard": {
         parameters: {
             query?: never;
@@ -301,6 +349,180 @@ export interface components {
             severity?: string;
             summary?: string;
         };
+        CodingLeaderboard: {
+            models: components["schemas"]["CodingModelProfile"][];
+            recentRuns: components["schemas"]["CodingRunRecord"][];
+            slices: components["schemas"]["CodingSliceCell"][];
+            /** Format: int32 */
+            totalRuns: number;
+            /** Format: int32 */
+            windowDays: number;
+        };
+        CodingModelProfile: {
+            /** Format: int32 */
+            abandonedRuns: number;
+            /** Format: double */
+            avgCcrRounds: number;
+            /** Format: double */
+            avgHumanThreads: number;
+            /** Format: int32 */
+            avgLocChurn: number;
+            /** Format: double */
+            avgPromptTurns: number;
+            /** Format: double */
+            avgRedCiPushes: number;
+            /** Format: double */
+            avgTestsDelta: number;
+            /** Format: double */
+            ccrNoiseRatio: number;
+            /** Format: double */
+            escapedRegressionRate: number;
+            /** Format: int32 */
+            escapedRegressions: number;
+            /** Format: double */
+            firstPassCleanRate: number;
+            /** Format: int32 */
+            firstPassCleanRuns: number;
+            lineage: string;
+            /** Format: double */
+            mergedClean24hRate: number;
+            /** Format: int32 */
+            mergedClean24hRuns: number;
+            /** Format: int32 */
+            mergedRuns: number;
+            model: string;
+            /** Format: int32 */
+            p50TimeToGreenSec: number;
+            /** Format: int32 */
+            p50TimeToMergeSec: number;
+            /** Format: int32 */
+            p90TimeToGreenSec: number;
+            /** Format: int32 */
+            p90TimeToMergeSec: number;
+            /** Format: int32 */
+            totalCcrActionable: number;
+            /** Format: int32 */
+            totalCcrNoise: number;
+            /** Format: int32 */
+            totalHumanThreads: number;
+            /** Format: int32 */
+            totalRuns: number;
+            /** Format: double */
+            zeroTouchRate: number;
+            /** Format: int32 */
+            zeroTouchRuns: number;
+        };
+        CodingRunInput: {
+            abandoned?: boolean;
+            /** Format: int32 */
+            ccrActionableCount?: number;
+            /** Format: int32 */
+            ccrNoiseCount?: number;
+            /** Format: int32 */
+            ccrRounds?: number;
+            /** Format: date-time */
+            clientSentAt?: string | null;
+            digestSummary?: string;
+            escapedRegression?: boolean;
+            /** Format: int32 */
+            filesChanged?: number;
+            firstPassClean?: boolean;
+            harness?: string;
+            /** Format: int32 */
+            humanThreadsCount?: number;
+            issueRef?: string;
+            lineage?: string;
+            /** Format: int32 */
+            locAdded?: number;
+            /** Format: int32 */
+            locDeleted?: number;
+            mergedWithoutFollowup24h?: boolean;
+            model: string;
+            /** Format: date-time */
+            occurredAt?: string | null;
+            /** Format: int32 */
+            prNumber?: number;
+            /** Format: int32 */
+            promptTurnCount?: number;
+            queueOnly?: boolean;
+            /** Format: int32 */
+            redCiPushes?: number;
+            repo?: string;
+            runKey: string;
+            taskKind?: string;
+            /** Format: int32 */
+            testsDelta?: number;
+            /** Format: int32 */
+            timeToGreenSec?: number;
+            /** Format: int32 */
+            timeToMergeSec?: number;
+        };
+        CodingRunRecord: {
+            abandoned: boolean;
+            /** Format: int32 */
+            ccrActionableCount: number;
+            /** Format: int32 */
+            ccrNoiseCount: number;
+            /** Format: int32 */
+            ccrRounds: number;
+            digestSummary: string;
+            escapedRegression: boolean;
+            /** Format: int32 */
+            filesChanged: number;
+            firstPassClean: boolean;
+            harness: string;
+            humanOverride: string;
+            /** Format: int32 */
+            humanThreadsCount: number;
+            /** Format: int64 */
+            id: number;
+            issueRef: string;
+            lineage: string;
+            /** Format: int32 */
+            locAdded: number;
+            /** Format: int32 */
+            locDeleted: number;
+            mergedWithoutFollowup24h: boolean;
+            model: string;
+            /** Format: date-time */
+            occurredAt: string;
+            overrideNote: string;
+            /** Format: int32 */
+            prNumber: number;
+            /** Format: int32 */
+            promptTurnCount: number;
+            /** Format: date-time */
+            recordedAt: string;
+            /** Format: int32 */
+            redCiPushes: number;
+            repo: string;
+            runKey: string;
+            sizeBucket: string;
+            taskKind: string;
+            /** Format: int32 */
+            testsDelta: number;
+            /** Format: int32 */
+            timeToGreenSec: number;
+            /** Format: int32 */
+            timeToMergeSec: number;
+        };
+        CodingSliceCell: {
+            /** Format: double */
+            avgCcrRounds: number;
+            /** Format: double */
+            escapedRegressionRate: number;
+            /** Format: double */
+            firstPassCleanRate: number;
+            model: string;
+            /** Format: int32 */
+            p50TimeToMergeSec: number;
+            /** Format: int32 */
+            runs: number;
+            sizeBucket: string;
+            taskKind: string;
+            /** Format: double */
+            zeroTouchRate: number;
+        };
         CreateTokenRequest: {
             name: string;
         };
@@ -426,6 +648,19 @@ export interface components {
             /** Format: int64 */
             id: number;
         };
+        OverrideCodingRunInput: {
+            /**
+             * @description Override value: `confirmed` (marks the PR outcome clean and clears `escapedRegression`),
+             *     `overturned` (marks the PR outcome as having an escaped regression), or `clear` (resets to recorded metrics).
+             */
+            humanOverride: string;
+            note?: string;
+        };
+        OverrideCodingRunResponse: {
+            humanOverride: string;
+            /** Format: int64 */
+            id: number;
+        };
         PanelLeg: {
             backupModel?: string;
             isChallenger: boolean;
@@ -486,6 +721,13 @@ export interface components {
             runKey: string;
             skill: string;
             winningRole?: string;
+        };
+        RecordedCodingRunOutput: {
+            /** Format: int64 */
+            runId: number;
+            runKey: string;
+            sizeBucket: string;
+            spooled?: boolean;
         };
         RecordedRunOutput: {
             completedTrials: components["schemas"]["Trial"][];
@@ -892,6 +1134,153 @@ export interface operations {
                 };
             };
             /** @description Candidate not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_coding_leaderboard_handler: {
+        parameters: {
+            query?: {
+                /** @description Lookback window in days (1..=3650, defaults to 90) */
+                days?: number | null;
+                /** @description Optional owner/repo filter */
+                repo?: string | null;
+                /** @description Optional task kind filter: feature, bugfix, refactor, cleanup, other */
+                taskKind?: string | null;
+                /** @description Optional diff size bucket filter: S (<50 LOC), M (50..=250 LOC), L (>250 LOC) */
+                sizeBucket?: string | null;
+                /** @description Optional RFC3339 lower bound timestamp (overrides days) */
+                from?: string | null;
+                /** @description Optional RFC3339 upper bound timestamp */
+                to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Multi-axis coding model profiles and diff-size / task-kind slice cells */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodingLeaderboard"];
+                };
+            };
+            /** @description Invalid filter parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    record_coding_run_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodingRunInput"];
+            };
+        };
+        responses: {
+            /** @description Recorded single-model coding run idempotently by runKey */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordedCodingRunOutput"];
+                };
+            };
+            /** @description Invalid coding run payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    override_coding_run_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Coding run ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OverrideCodingRunInput"];
+            };
+        };
+        responses: {
+            /** @description Updated coding run override */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverrideCodingRunResponse"];
+                };
+            };
+            /** @description Invalid humanOverride value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Coding run not found */
             404: {
                 headers: {
                     [name: string]: unknown;

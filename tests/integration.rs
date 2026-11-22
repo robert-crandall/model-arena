@@ -1788,3 +1788,205 @@ async fn arena_runs_overrides_timing_and_leaderboard_flow() {
 
     tdb.teardown().await;
 }
+
+#[tokio::test]
+async fn arena_coding_runs_overrides_and_coding_leaderboard_flow() {
+    let Some(tdb) = TestDb::setup().await else {
+        eprintln!("skipping Postgres integration test (TEST_DATABASE_URL not set)");
+        return;
+    };
+    let base_url = spawn_in_process_server(tdb.pool.clone(), true).await;
+
+    let client = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .expect("cookie client");
+
+    let reg = client
+        .post(format!("{base_url}/api/auth/register"))
+        .json(&json!({
+            "email": "coder@example.com",
+            "password": "correct-horse-battery-staple",
+            "name": "Coder"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg.status(), StatusCode::CREATED);
+
+    // 1. Record a small bugfix PR (S: 20 + 10 = 30 LOC) by claude-opus-5.5
+    let rec1_resp = client
+        .post(format!("{base_url}/api/coding-runs"))
+        .json(&json!({
+            "runKey": "pr_model_arena_101",
+            "model": "claude-opus-5.5",
+            "harness": "copilot-cli",
+            "repo": "robert-crandall/model-arena-rust",
+            "prNumber": 101,
+            "taskKind": "bugfix",
+            "locAdded": 20,
+            "locDeleted": 10,
+            "filesChanged": 2,
+            "testsDelta": 15,
+            "promptTurnCount": 1,
+            "redCiPushes": 0,
+            "ccrRounds": 1,
+            "ccrActionableCount": 0,
+            "ccrNoiseCount": 1,
+            "humanThreadsCount": 0,
+            "escapedRegression": false,
+            "mergedWithoutFollowup24h": true,
+            "firstPassClean": true,
+            "abandoned": false,
+            "timeToGreenSec": 180,
+            "timeToMergeSec": 420,
+            "digestSummary": "Zero-touch bugfix, 1 noisy CCR nit pushed back",
+            "clientSentAt": "2026-04-01T12:00:00Z"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rec1_resp.status(), StatusCode::OK);
+    let rec1: Value = rec1_resp.json().await.unwrap();
+    let run1_id = rec1["runId"].as_i64().expect("run1Id");
+    assert_eq!(rec1["sizeBucket"], "S");
+
+    // 2. Record a medium feature PR (M: 120 + 30 = 150 LOC) by claude-opus-5.5 that needed 2 turns and 1 actionable CCR fix
+    let rec2_resp = client
+        .post(format!("{base_url}/api/coding-runs"))
+        .json(&json!({
+            "runKey": "pr_model_arena_102",
+            "model": "claude-opus-5.5",
+            "harness": "t3-code",
+            "repo": "robert-crandall/model-arena-rust",
+            "prNumber": 102,
+            "taskKind": "feature",
+            "locAdded": 120,
+            "locDeleted": 30,
+            "filesChanged": 4,
+            "testsDelta": 45,
+            "promptTurnCount": 2,
+            "redCiPushes": 1,
+            "ccrRounds": 2,
+            "ccrActionableCount": 1,
+            "ccrNoiseCount": 1,
+            "humanThreadsCount": 1,
+            "escapedRegression": false,
+            "mergedWithoutFollowup24h": true,
+            "firstPassClean": false,
+            "abandoned": false,
+            "timeToGreenSec": 300,
+            "timeToMergeSec": 900,
+            "digestSummary": "1 steering turn + 1 actionable CCR fix"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rec2_resp.status(), StatusCode::OK);
+    let rec2: Value = rec2_resp.json().await.unwrap();
+    let run2_id = rec2["runId"].as_i64().expect("run2Id");
+    assert_eq!(rec2["sizeBucket"], "M");
+
+    // 3. Stale replay on run 1 is ignored without overwriting
+    let stale_resp = client
+        .post(format!("{base_url}/api/coding-runs"))
+        .json(&json!({
+            "runKey": "pr_model_arena_101",
+            "model": "claude-opus-5.5",
+            "taskKind": "bugfix",
+            "locAdded": 400,
+            "locDeleted": 100,
+            "abandoned": true,
+            "clientSentAt": "2026-04-01T11:00:00Z"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale_resp.status(), StatusCode::OK);
+    let stale: Value = stale_resp.json().await.unwrap();
+    assert_eq!(stale["runId"], run1_id);
+    assert_eq!(stale["sizeBucket"], "S");
+
+    // 4. Override run 2 as "overturned" (human discovered an escaped regression after merge)
+    let ovr_resp = client
+        .post(format!("{base_url}/api/coding-runs/{run2_id}/override"))
+        .json(&json!({
+            "humanOverride": "overturned",
+            "note": "Broke pagination cursor under empty slice"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ovr_resp.status(), StatusCode::OK);
+    let ovr: Value = ovr_resp.json().await.unwrap();
+    assert_eq!(ovr["humanOverride"], "overturned");
+
+    // 5. Query coding leaderboard and verify multi-axis profile + slice breakdown
+    let lb_resp = client
+        .get(format!("{base_url}/api/coding-leaderboard?days=90"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(lb_resp.status(), StatusCode::OK);
+    let lb: Value = lb_resp.json().await.unwrap();
+    assert_eq!(lb["totalRuns"], 2);
+    let opus = &lb["models"][0];
+    assert_eq!(opus["model"], "claude-opus-5.5");
+    assert_eq!(opus["lineage"], "anthropic");
+    assert_eq!(opus["totalRuns"], 2);
+    assert_eq!(opus["mergedRuns"], 2);
+    assert_eq!(opus["zeroTouchRuns"], 1);
+    assert_eq!(opus["zeroTouchRate"], 0.5);
+    assert_eq!(opus["firstPassCleanRuns"], 1);
+    assert_eq!(opus["firstPassCleanRate"], 0.5);
+    // Run 2 was overturned, so only Run 1 counts as mergedClean24h, and Run 2 counts as escapedRegression
+    assert_eq!(opus["mergedClean24hRuns"], 1);
+    assert_eq!(opus["mergedClean24hRate"], 0.5);
+    assert_eq!(opus["escapedRegressions"], 1);
+    assert_eq!(opus["escapedRegressionRate"], 0.5);
+    assert_eq!(opus["totalCcrActionable"], 1);
+    assert_eq!(opus["totalCcrNoise"], 2);
+    assert_eq!(opus["ccrNoiseRatio"], 0.667);
+    assert_eq!(opus["p50TimeToGreenSec"], 240);
+    assert_eq!(opus["p50TimeToMergeSec"], 660);
+
+    // Slice filter check: sizeBucket=S returns only the S bugfix run
+    let lb_s_resp = client
+        .get(format!(
+            "{base_url}/api/coding-leaderboard?sizeBucket=S&taskKind=bugfix"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(lb_s_resp.status(), StatusCode::OK);
+    let lb_s: Value = lb_s_resp.json().await.unwrap();
+    assert_eq!(lb_s["totalRuns"], 1);
+    assert_eq!(lb_s["slices"][0]["sizeBucket"], "S");
+    assert_eq!(lb_s["slices"][0]["taskKind"], "bugfix");
+    assert_eq!(lb_s["slices"][0]["zeroTouchRate"], 1.0);
+
+    // 6. Override run 2 as "confirmed" (clearing the overturned regression) and verify clean rates restore
+    let ovr_confirm = client
+        .post(format!("{base_url}/api/coding-runs/{run2_id}/override"))
+        .json(&json!({
+            "humanOverride": "confirmed",
+            "note": "Follow-up commit was unrelated doc tweak"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ovr_confirm.status(), StatusCode::OK);
+    let lb_after: Value = client
+        .get(format!("{base_url}/api/coding-leaderboard?days=90"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(lb_after["models"][0]["escapedRegressions"], 0);
+    assert_eq!(lb_after["models"][0]["mergedClean24hRuns"], 2);
+    assert_eq!(lb_after["models"][0]["mergedClean24hRate"], 1.0);
+
+    tdb.teardown().await;
+}
