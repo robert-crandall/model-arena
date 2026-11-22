@@ -1172,3 +1172,122 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
     let _ = server_child.kill().await;
     tdb.teardown().await;
 }
+
+#[tokio::test]
+async fn arena_schema_migration_enforces_constraints_and_cascades() {
+    let Some(tdb) = TestDb::setup().await else {
+        return;
+    };
+
+    let user_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, name)
+         VALUES ('arena@example.com', 'hash', 'Arena')
+         RETURNING id",
+    )
+    .fetch_one(&tdb.pool)
+    .await
+    .expect("insert user");
+
+    sqlx::query(
+        "INSERT INTO arena_roster (user_id, skill, lineage, champion_model, backup_model, sort_order)
+         VALUES ($1, 'adversarial-review', 'openai', 'gpt-6.1-sol', 'gpt-5.5', 0)",
+    )
+    .bind(user_id)
+    .execute(&tdb.pool)
+    .await
+    .expect("insert roster");
+
+    let trial_id: i64 = sqlx::query_scalar(
+        "INSERT INTO arena_trials (user_id, skill, lineage, champion_model, challenger_model, target_runs)
+         VALUES ($1, 'adversarial-review', 'openai', 'gpt-6.1-sol', 'gpt-6.2-sol', 15)
+         RETURNING id",
+    )
+    .bind(user_id)
+    .fetch_one(&tdb.pool)
+    .await
+    .expect("insert first active trial");
+
+    // Partial unique index must block a second open trial on the same (user_id, skill, lineage)
+    let dup_open = sqlx::query(
+        "INSERT INTO arena_trials (user_id, skill, lineage, champion_model, challenger_model, target_runs)
+         VALUES ($1, 'adversarial-review', 'openai', 'gpt-6.1-sol', 'gpt-6.3-sol', 15)",
+    )
+    .bind(user_id)
+    .execute(&tdb.pool)
+    .await;
+    assert!(
+        dup_open.is_err(),
+        "second open trial on the same slot must fail unique index"
+    );
+
+    // Retiring the trial frees the slot for a new bout
+    sqlx::query("UPDATE arena_trials SET status = 'retired', decided_at = NOW() WHERE id = $1")
+        .bind(trial_id)
+        .execute(&tdb.pool)
+        .await
+        .expect("retire trial");
+
+    sqlx::query(
+        "INSERT INTO arena_trials (user_id, skill, lineage, champion_model, challenger_model, target_runs)
+         VALUES ($1, 'adversarial-review', 'openai', 'gpt-6.1-sol', 'gpt-6.3-sol', 15)",
+    )
+    .bind(user_id)
+    .execute(&tdb.pool)
+    .await
+    .expect("insert trial after prior retired");
+
+    // Reject invalid skill CHECK constraint on arena_roster
+    let invalid_skill = sqlx::query(
+        "INSERT INTO arena_roster (user_id, skill, lineage, champion_model, backup_model, sort_order, enabled)
+         VALUES ($1, 'invalid-skill', 'anthropic', 'claude-opus-5.5', '', 0, TRUE)",
+    )
+    .bind(user_id)
+    .execute(&tdb.pool)
+    .await;
+    assert!(
+        invalid_skill.is_err(),
+        "expected CHECK constraint on arena_roster.skill to reject invalid skill"
+    );
+
+    // Insert a coding run and verify cascade on user deletion
+    sqlx::query(
+        "INSERT INTO arena_coding_runs (user_id, run_key, model, lineage, task_kind, loc_added, loc_deleted, size_bucket)
+         VALUES ($1, 'cr_1', 'claude-opus-5.5', 'anthropic', 'feature', 80, 20, 'M')",
+    )
+    .bind(user_id)
+    .execute(&tdb.pool)
+    .await
+    .expect("insert coding run");
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user_id)
+        .execute(&tdb.pool)
+        .await
+        .expect("delete user");
+
+    let remaining_roster: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM arena_roster WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&tdb.pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining_roster, 0);
+
+    let remaining_trials: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM arena_trials WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&tdb.pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining_trials, 0);
+
+    let remaining_coding_runs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM arena_coding_runs WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&tdb.pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining_coding_runs, 0);
+
+    tdb.teardown().await;
+}
