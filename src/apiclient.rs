@@ -5,14 +5,60 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
+use crate::arena::{
+    CodingLeaderboard, CodingLeaderboardQuery, CodingRunInput, DecideTrialInput, Leaderboard,
+    LeaderboardQuery, OverrideCandidateInput, OverrideCandidateResponse, OverrideCodingRunInput,
+    OverrideCodingRunResponse, PanelSelection, RecordRunInput, RecordedCodingRunOutput,
+    RecordedRunOutput, ReplaceRosterRequest, RosterListResponse, RosterSlotInput, SelectPanelInput,
+    StartTrialInput, Trial, TrialsListResponse,
+};
 use crate::auth::{CreatedApiToken, User};
 use crate::routes::{CreateTokenRequest, ErrorBody, LoginRequest};
 
 pub const APP_SLUG: &str = "model-arena-rust";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiClientError {
+    Status { status: u16, message: String },
+    Transport(String),
+}
+
+impl ApiClientError {
+    pub fn is_transient_spoolable(&self) -> bool {
+        match self {
+            Self::Transport(_) => true,
+            Self::Status { status, .. } => *status >= 500 || *status == 429 || *status == 408,
+        }
+    }
+
+    pub fn is_permanent_client_rejection(&self) -> bool {
+        match self {
+            Self::Status { status, .. } => {
+                if *status == 401 || *status == 403 || *status == 408 || *status == 429 {
+                    return false;
+                }
+                (400..500).contains(status)
+            }
+            Self::Transport(_) => false,
+        }
+    }
+}
+
+impl std::fmt::Display for ApiClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Status { status, message } => write!(f, "HTTP {status}: {message}"),
+            Self::Transport(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ApiClientError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -190,38 +236,270 @@ impl ApiClient {
         })
     }
 
-    pub async fn me(&self) -> Result<User, String> {
-        let resp = self
-            .http
-            .get(format!("{}/api/auth/me", self.base_url))
-            .send()
-            .await
-            .map_err(|err| format!("request to /api/auth/me failed: {err}"))?;
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
 
+    async fn send_json<T: DeserializeOwned>(
+        &self,
+        req: reqwest::RequestBuilder,
+        context: &str,
+    ) -> Result<T, ApiClientError> {
+        let resp = req.send().await.map_err(|err| {
+            ApiClientError::Transport(format!("request to {context} failed: {err}"))
+        })?;
         if !resp.status().is_success() {
-            return Err(read_api_error(resp).await);
+            return Err(read_api_client_error(resp).await);
         }
-
-        resp.json::<User>()
+        resp.json::<T>()
             .await
-            .map_err(|err| format!("invalid /api/auth/me response: {err}"))
+            .map_err(|err| ApiClientError::Transport(format!("invalid {context} response: {err}")))
+    }
+
+    pub async fn me_typed(&self, timeout: Option<Duration>) -> Result<User, ApiClientError> {
+        let mut req = self.http.get(format!("{}/api/auth/me", self.base_url));
+        if let Some(t) = timeout {
+            req = req.timeout(t);
+        }
+        self.send_json(req, "/api/auth/me").await
+    }
+
+    pub async fn me(&self) -> Result<User, String> {
+        self.me_typed(None).await.map_err(|e| e.to_string())
     }
 
     pub async fn list_users(&self) -> Result<Vec<User>, String> {
-        let resp = self
+        let req = self.http.get(format!("{}/api/users", self.base_url));
+        self.send_json(req, "/api/users")
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    pub async fn select_panel(
+        &self,
+        input: &SelectPanelInput,
+        timeout: Option<Duration>,
+    ) -> Result<PanelSelection, ApiClientError> {
+        let mut req = self
             .http
-            .get(format!("{}/api/users", self.base_url))
-            .send()
-            .await
-            .map_err(|err| format!("request to /api/users failed: {err}"))?;
-
-        if !resp.status().is_success() {
-            return Err(read_api_error(resp).await);
+            .post(format!("{}/api/panel/select", self.base_url))
+            .json(input);
+        if let Some(t) = timeout {
+            req = req.timeout(t);
         }
+        self.send_json(req, "/api/panel/select").await
+    }
 
-        resp.json::<Vec<User>>()
-            .await
-            .map_err(|err| format!("invalid /api/users response: {err}"))
+    pub async fn record_run(
+        &self,
+        input: &RecordRunInput,
+    ) -> Result<RecordedRunOutput, ApiClientError> {
+        let req = self
+            .http
+            .post(format!("{}/api/runs", self.base_url))
+            .json(input);
+        self.send_json(req, "/api/runs").await
+    }
+
+    pub async fn get_leaderboard(
+        &self,
+        query: &LeaderboardQuery,
+    ) -> Result<Leaderboard, ApiClientError> {
+        let mut url = Url::parse(&format!("{}/api/leaderboard", self.base_url))
+            .map_err(|err| ApiClientError::Transport(err.to_string()))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            if let Some(days) = query.days {
+                pairs.append_pair("days", &days.to_string());
+            }
+            if let Some(skill) = query
+                .skill
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("skill", skill);
+            }
+            if let Some(repo) = query
+                .repo
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("repo", repo);
+            }
+            if let Some(from) = query.from {
+                pairs.append_pair("from", &from.to_rfc3339());
+            }
+            if let Some(to) = query.to {
+                pairs.append_pair("to", &to.to_rfc3339());
+            }
+        }
+        let req = self.http.get(url);
+        self.send_json(req, "/api/leaderboard").await
+    }
+
+    pub async fn list_roster(
+        &self,
+        skill: Option<&str>,
+    ) -> Result<RosterListResponse, ApiClientError> {
+        let mut url = Url::parse(&format!("{}/api/roster", self.base_url))
+            .map_err(|err| ApiClientError::Transport(err.to_string()))?;
+        if let Some(s) = skill.map(str::trim).filter(|s| !s.is_empty()) {
+            url.query_pairs_mut().append_pair("skill", s);
+        }
+        let req = self.http.get(url);
+        self.send_json(req, "/api/roster").await
+    }
+
+    pub async fn set_roster(
+        &self,
+        skill: &str,
+        slots: Vec<RosterSlotInput>,
+    ) -> Result<RosterListResponse, ApiClientError> {
+        let trimmed = skill.trim();
+        if trimmed.is_empty() {
+            return Err(ApiClientError::Status {
+                status: 400,
+                message: "skill is required".to_string(),
+            });
+        }
+        let mut url = Url::parse(&format!("{}/api/roster", self.base_url))
+            .map_err(|err| ApiClientError::Transport(err.to_string()))?;
+        url.path_segments_mut()
+            .map_err(|_| ApiClientError::Transport("invalid base URL path".to_string()))?
+            .push(trimmed);
+        let req = self.http.put(url).json(&ReplaceRosterRequest { slots });
+        self.send_json(req, "/api/roster/{skill}").await
+    }
+
+    pub async fn list_trials(
+        &self,
+        skill: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<TrialsListResponse, ApiClientError> {
+        let mut url = Url::parse(&format!("{}/api/trials", self.base_url))
+            .map_err(|err| ApiClientError::Transport(err.to_string()))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            if let Some(s) = skill.map(str::trim).filter(|s| !s.is_empty()) {
+                pairs.append_pair("skill", s);
+            }
+            if let Some(st) = status.map(str::trim).filter(|s| !s.is_empty()) {
+                pairs.append_pair("status", st);
+            }
+        }
+        let req = self.http.get(url);
+        self.send_json(req, "/api/trials").await
+    }
+
+    pub async fn start_trial(&self, input: &StartTrialInput) -> Result<Trial, ApiClientError> {
+        let req = self
+            .http
+            .post(format!("{}/api/trials", self.base_url))
+            .json(input);
+        self.send_json(req, "/api/trials").await
+    }
+
+    pub async fn decide_trial(
+        &self,
+        trial_id: i64,
+        decision: &str,
+    ) -> Result<Trial, ApiClientError> {
+        let req = self
+            .http
+            .post(format!("{}/api/trials/{trial_id}/decide", self.base_url))
+            .json(&DecideTrialInput {
+                decision: decision.to_string(),
+            });
+        self.send_json(req, "/api/trials/{id}/decide").await
+    }
+
+    pub async fn override_candidate(
+        &self,
+        candidate_id: i64,
+        input: &OverrideCandidateInput,
+    ) -> Result<OverrideCandidateResponse, ApiClientError> {
+        let req = self
+            .http
+            .post(format!(
+                "{}/api/candidates/{candidate_id}/override",
+                self.base_url
+            ))
+            .json(input);
+        self.send_json(req, "/api/candidates/{id}/override").await
+    }
+
+    pub async fn record_coding_run(
+        &self,
+        input: &CodingRunInput,
+    ) -> Result<RecordedCodingRunOutput, ApiClientError> {
+        let req = self
+            .http
+            .post(format!("{}/api/coding-runs", self.base_url))
+            .json(input);
+        self.send_json(req, "/api/coding-runs").await
+    }
+
+    pub async fn override_coding_run(
+        &self,
+        coding_run_id: i64,
+        input: &OverrideCodingRunInput,
+    ) -> Result<OverrideCodingRunResponse, ApiClientError> {
+        let req = self
+            .http
+            .post(format!(
+                "{}/api/coding-runs/{coding_run_id}/override",
+                self.base_url
+            ))
+            .json(input);
+        self.send_json(req, "/api/coding-runs/{id}/override").await
+    }
+
+    pub async fn get_coding_leaderboard(
+        &self,
+        query: &CodingLeaderboardQuery,
+    ) -> Result<CodingLeaderboard, ApiClientError> {
+        let mut url = Url::parse(&format!("{}/api/coding-leaderboard", self.base_url))
+            .map_err(|err| ApiClientError::Transport(err.to_string()))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            if let Some(days) = query.days {
+                pairs.append_pair("days", &days.to_string());
+            }
+            if let Some(repo) = query
+                .repo
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("repo", repo);
+            }
+            if let Some(tk) = query
+                .task_kind
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("taskKind", tk);
+            }
+            if let Some(sb) = query
+                .size_bucket
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("sizeBucket", sb);
+            }
+            if let Some(from) = query.from {
+                pairs.append_pair("from", &from.to_rfc3339());
+            }
+            if let Some(to) = query.to {
+                pairs.append_pair("to", &to.to_rfc3339());
+            }
+        }
+        let req = self.http.get(url);
+        self.send_json(req, "/api/coding-leaderboard").await
     }
 }
 
@@ -273,12 +551,22 @@ pub async fn mint_token_via_login(
         .map_err(|err| format!("invalid /api/tokens response: {err}"))
 }
 
-async fn read_api_error(resp: reqwest::Response) -> String {
-    let status = resp.status();
+async fn read_api_client_error(resp: reqwest::Response) -> ApiClientError {
+    let status = resp.status().as_u16();
     if let Ok(err_body) = resp.json::<ErrorBody>().await {
-        return format!("HTTP {}: {}", status.as_u16(), err_body.error);
+        return ApiClientError::Status {
+            status,
+            message: err_body.error,
+        };
     }
-    format!("HTTP {}", status.as_u16())
+    ApiClientError::Status {
+        status,
+        message: format!("HTTP {status}"),
+    }
+}
+
+async fn read_api_error(resp: reqwest::Response) -> String {
+    read_api_client_error(resp).await.to_string()
 }
 
 #[cfg(test)]

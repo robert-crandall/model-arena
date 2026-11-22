@@ -1482,7 +1482,9 @@ pub async fn override_candidate(
     })
 }
 
-fn validate_and_normalize_coding_run_input(input: &mut CodingRunInput) -> Result<String, ApiError> {
+pub fn validate_and_normalize_coding_run_input(
+    input: &mut CodingRunInput,
+) -> Result<String, ApiError> {
     input.run_key = input.run_key.trim().to_string();
     if input.run_key.is_empty() || input.run_key.len() > 256 {
         return Err(ApiError::bad_request(

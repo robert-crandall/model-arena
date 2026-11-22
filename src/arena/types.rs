@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::{IntoParams, ToSchema};
@@ -42,7 +43,7 @@ pub struct RosterEntry {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RosterSlotInput {
     pub lineage: String,
@@ -95,7 +96,7 @@ pub struct Trial {
     pub decided_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StartTrialInput {
     pub skill: String,
@@ -108,13 +109,13 @@ pub struct StartTrialInput {
     pub allow_pr_diff: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DecideTrialInput {
     pub decision: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectPanelInput {
     pub skill: String,
@@ -153,7 +154,7 @@ pub struct PanelSelection {
     pub critic_order: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunLegInput {
     pub slot_index: i32,
@@ -179,7 +180,7 @@ pub struct RunLegInput {
     pub critic_bloat_dropped_count: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateInput {
     #[serde(default)]
@@ -194,7 +195,7 @@ pub struct CandidateInput {
     pub proposing_models: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordRunInput {
     pub run_key: String,
@@ -220,8 +221,10 @@ pub struct RecordRunInput {
     #[serde(default)]
     pub winning_role: String,
     #[serde(default)]
+    #[schemars(with = "Option<String>")]
     pub occurred_at: Option<DateTime<Utc>>,
     #[serde(default)]
+    #[schemars(with = "Option<String>")]
     pub client_sent_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub queue_only: bool,
@@ -240,7 +243,7 @@ pub struct RecordedRunOutput {
     pub spooled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OverrideCandidateInput {
     pub human_override: String,
@@ -255,7 +258,9 @@ pub struct OverrideCandidateResponse {
     pub human_override: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, IntoParams, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Default, Serialize, Deserialize, ToSchema, IntoParams, JsonSchema, PartialEq, Eq,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct LeaderboardQuery {
     /// Lookback window in days (1..=3650, defaults to 90)
@@ -265,8 +270,10 @@ pub struct LeaderboardQuery {
     /// Optional owner/repo filter
     pub repo: Option<String>,
     /// Optional RFC3339 lower bound timestamp (overrides days)
+    #[schemars(with = "Option<String>")]
     pub from: Option<DateTime<Utc>>,
     /// Optional RFC3339 upper bound timestamp
+    #[schemars(with = "Option<String>")]
     pub to: Option<DateTime<Utc>>,
 }
 
@@ -402,7 +409,7 @@ pub struct Leaderboard {
     pub recent_runs: Vec<RecentRunView>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CodingRunInput {
     pub run_key: String,
@@ -454,8 +461,10 @@ pub struct CodingRunInput {
     #[serde(default)]
     pub digest_summary: String,
     #[serde(default)]
+    #[schemars(with = "Option<String>")]
     pub occurred_at: Option<DateTime<Utc>>,
     #[serde(default)]
+    #[schemars(with = "Option<String>")]
     pub client_sent_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub queue_only: bool,
@@ -507,7 +516,7 @@ pub struct RecordedCodingRunOutput {
     pub spooled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OverrideCodingRunInput {
     /// Override value: `confirmed` (marks the PR outcome clean and clears `escapedRegression`),
@@ -524,7 +533,9 @@ pub struct OverrideCodingRunResponse {
     pub human_override: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, IntoParams, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Default, Serialize, Deserialize, ToSchema, IntoParams, JsonSchema, PartialEq, Eq,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct CodingLeaderboardQuery {
     /// Lookback window in days (1..=3650, defaults to 90)
@@ -536,8 +547,10 @@ pub struct CodingLeaderboardQuery {
     /// Optional diff size bucket filter: S (<50 LOC), M (50..=250 LOC), L (>250 LOC)
     pub size_bucket: Option<String>,
     /// Optional RFC3339 lower bound timestamp (overrides days)
+    #[schemars(with = "Option<String>")]
     pub from: Option<DateTime<Utc>>,
     /// Optional RFC3339 upper bound timestamp
+    #[schemars(with = "Option<String>")]
     pub to: Option<DateTime<Utc>>,
 }
 
