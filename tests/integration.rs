@@ -1990,3 +1990,267 @@ async fn arena_coding_runs_overrides_and_coding_leaderboard_flow() {
 
     tdb.teardown().await;
 }
+
+#[tokio::test]
+async fn arena_mcp_cli_spool_and_backfill_flow() {
+    use app::arena::{
+        CodingRunInput, RecordRunInput, RunLegInput, SpoolScope, flush_spool,
+        submit_or_spool_coding_run, submit_or_spool_run,
+    };
+
+    let Some(tdb) = TestDb::setup().await else {
+        eprintln!("skipping Postgres integration test (TEST_DATABASE_URL not set)");
+        return;
+    };
+    let base_url = spawn_in_process_server(tdb.pool.clone(), true).await;
+
+    let http = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .expect("cookie client");
+
+    let reg = http
+        .post(format!("{base_url}/api/auth/register"))
+        .json(&json!({
+            "email": "mcp-arena@example.com",
+            "password": "mcp-strong-passphrase",
+            "name": "MCP Arena"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg.status(), StatusCode::CREATED);
+
+    let minted = mint_token_via_login(
+        &base_url,
+        "mcp-arena@example.com",
+        "mcp-strong-passphrase",
+        "mcp-arena-cli",
+    )
+    .await
+    .expect("mint token");
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let cfg_path = temp_dir.path().join("model-arena-rust.json");
+    let live_cfg = ClientConfig {
+        app_url: base_url.clone(),
+        token: minted.token.clone(),
+    };
+    live_cfg.write_atomic(&cfg_path).expect("write config");
+
+    // 1. Offline spooling when server is unreachable, followed by flush_spool against live server
+    let spool_root = temp_dir.path().join("spool");
+    let dead_cfg = ClientConfig {
+        app_url: "http://127.0.0.1:1".to_string(),
+        token: minted.token.clone(),
+    };
+    let dead_client = app::apiclient::ApiClient::new(&dead_cfg).unwrap();
+    let spool_scope = SpoolScope::with_base_dir(&dead_cfg, Some(spool_root.clone()));
+
+    let spooled_run = submit_or_spool_run(
+        &dead_client,
+        &spool_scope,
+        RecordRunInput {
+            run_key: "spooled_ar_1".to_string(),
+            skill: "adversarial-review".to_string(),
+            artifact_kind: "pr_diff".to_string(),
+            artifact_ref: "robert-crandall/model-arena-rust#5".to_string(),
+            repo: "robert-crandall/model-arena-rust".to_string(),
+            phase: "independent".to_string(),
+            host_model: "gemini-4-argon".to_string(),
+            host_lineage: String::new(),
+            harness: "copilot-cli".to_string(),
+            machine: "test-host".to_string(),
+            approach_verdict: "keep".to_string(),
+            winning_role: String::new(),
+            occurred_at: None,
+            client_sent_at: None,
+            queue_only: false,
+            legs: vec![RunLegInput {
+                slot_index: 0,
+                role: "reviewer".to_string(),
+                lineage: "openai".to_string(),
+                model: "gpt-6.1-sol".to_string(),
+                is_challenger: false,
+                trial_id: None,
+                status: "ok".to_string(),
+                duration_ms: 32_000,
+                won_core_plan: false,
+                cherry_picks_count: 0,
+                critic_adopted_count: 0,
+                critic_bloat_dropped_count: 0,
+            }],
+            candidates: Vec::new(),
+        },
+    )
+    .await
+    .expect("spool run offline");
+    assert!(spooled_run.spooled);
+
+    let spooled_coding = submit_or_spool_coding_run(
+        &dead_client,
+        &spool_scope,
+        CodingRunInput {
+            run_key: "spooled_cr_1".to_string(),
+            model: "claude-opus-5.5".to_string(),
+            lineage: String::new(),
+            harness: "t3-code".to_string(),
+            repo: "robert-crandall/model-arena-rust".to_string(),
+            pr_number: 55,
+            issue_ref: String::new(),
+            task_kind: "feature".to_string(),
+            loc_added: 60,
+            loc_deleted: 15,
+            files_changed: 3,
+            tests_delta: 25,
+            prompt_turn_count: 1,
+            red_ci_pushes: 0,
+            ccr_rounds: 1,
+            ccr_actionable_count: 0,
+            ccr_noise_count: 0,
+            human_threads_count: 0,
+            escaped_regression: false,
+            merged_without_followup_24h: true,
+            first_pass_clean: true,
+            abandoned: false,
+            time_to_green_sec: 120,
+            time_to_merge_sec: 300,
+            digest_summary: "Clean spooled coding run".to_string(),
+            occurred_at: None,
+            client_sent_at: None,
+            queue_only: false,
+        },
+    )
+    .await
+    .expect("spool coding run offline");
+    assert!(spooled_coding.spooled);
+    assert_eq!(spooled_coding.size_bucket, "M");
+
+    // Flush the spooled files to the live server
+    let live_client = app::apiclient::ApiClient::new(&live_cfg).unwrap();
+    let flush_res = flush_spool(&live_client, &spool_scope).await;
+    assert_eq!(flush_res.flushed, 2);
+    assert_eq!(flush_res.pending, 0);
+
+    // 2. Verify `model-arena-rust-mcp list` exposes all 15 tools
+    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-rust-mcp");
+    let list_out = Command::new(mcp_bin)
+        .arg("list")
+        .arg("--config")
+        .arg(&cfg_path)
+        .output()
+        .await
+        .expect("run mcp list");
+    assert!(list_out.status.success());
+    let list_json: Value = serde_json::from_slice(&list_out.stdout).expect("parse mcp list json");
+    let tool_names: Vec<&str> = list_json["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    for expected in [
+        "whoami",
+        "list_users",
+        "select_panel",
+        "record_run",
+        "flush_spool",
+        "get_leaderboard",
+        "list_roster",
+        "set_roster",
+        "start_trial",
+        "decide_trial",
+        "override_candidate",
+        "record_coding_run",
+        "override_coding_run",
+        "get_coding_leaderboard",
+        "backfill_sessions",
+    ] {
+        assert!(
+            tool_names.contains(&expected),
+            "missing tool '{expected}' in list: {tool_names:?}"
+        );
+    }
+
+    // 3. Create synthetic ~/.copilot/session-state/<id>/events.jsonl and run `call backfill_sessions`
+    let session_root = temp_dir.path().join("session-state");
+    let sess_dir = session_root.join("sess-backfill-1");
+    std::fs::create_dir_all(&sess_dir).unwrap();
+    let base_ts = chrono::Utc::now() - chrono::Duration::hours(2);
+    let ts = |offset_secs: i64| (base_ts + chrono::Duration::seconds(offset_secs)).to_rfc3339();
+    let events_jsonl = [
+        json!({"type":"session.start","timestamp":ts(0),"data":{"startTime":ts(0),"selectedModel":"gemini-4-argon"}}).to_string(),
+        json!({"type":"user.message","timestamp":ts(1),"data":{"content":"Run plan tournament and review"}}).to_string(),
+        json!({"type":"tool.execution_start","timestamp":ts(2),"data":{"toolCallId":"pt_a","toolName":"task","arguments":{"name":"planner-a","description":"Minimal diff planner","agent_type":"general-purpose","model":"claude-opus-5.5"}}}).to_string(),
+        json!({"type":"tool.execution_start","timestamp":ts(3),"data":{"toolCallId":"pt_b","toolName":"task","arguments":{"name":"planner-b","description":"Clean architecture planner","agent_type":"general-purpose","model":"gpt-6.1-sol"}}}).to_string(),
+        json!({"type":"tool.execution_complete","timestamp":ts(22),"data":{"toolCallId":"pt_a","success":true,"result":"plan A"}}).to_string(),
+        json!({"type":"tool.execution_complete","timestamp":ts(38),"data":{"toolCallId":"pt_b","success":true,"result":"plan B"}}).to_string(),
+        json!({"type":"assistant.message","timestamp":ts(45),"data":{"content":"### Hybrid Plan\nWinning core plan: Planner A (claude-opus-5.5) on robert-crandall/model-arena-rust#8.\nCherry-picks from gpt-6.1-sol for transaction locking."}}).to_string(),
+        json!({"type":"user.message","timestamp":ts(300),"data":{"content":"Skip this delegated review"}}).to_string(),
+        json!({"type":"tool.execution_start","timestamp":ts(301),"data":{"toolCallId":"skip_1","toolName":"bash","arguments":{"command":"true \"model-arena:skip\""}}}).to_string(),
+        json!({"type":"assistant.message","timestamp":ts(310),"data":{"content":"### Adversarial review (gpt-6.1-sol, claude-opus-5.5)\n- **Approach:** `keep`\n- **Findings:** none\n- **Set aside:** none"}}).to_string(),
+    ]
+    .join("\n");
+    std::fs::write(sess_dir.join("events.jsonl"), events_jsonl).unwrap();
+
+    let bf_input = json!({
+        "sessionDir": session_root.to_string_lossy(),
+        "days": 30,
+        "dryRun": false
+    })
+    .to_string();
+    let bf_out = Command::new(mcp_bin)
+        .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
+        .env_remove("MCP_APP_URL")
+        .env_remove("MCP_APP_TOKEN")
+        .args([
+            "call",
+            "backfill_sessions",
+            "--input",
+            &bf_input,
+            "--config",
+        ])
+        .arg(&cfg_path)
+        .output()
+        .await
+        .expect("run mcp call backfill_sessions");
+    assert!(
+        bf_out.status.success(),
+        "backfill_sessions failed: {}",
+        String::from_utf8_lossy(&bf_out.stderr)
+    );
+    let bf_summary: Value = serde_json::from_slice(&bf_out.stdout).expect("parse backfill summary");
+    assert_eq!(bf_summary["sessionsScanned"], 1);
+    assert_eq!(bf_summary["runsFound"], 1);
+    assert_eq!(bf_summary["runsSubmitted"], 1);
+
+    // 4. Verify both the spooled run and the backfilled plan-tournament run appear in `call get_leaderboard`
+    let lb_out = Command::new(mcp_bin)
+        .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
+        .env_remove("MCP_APP_URL")
+        .env_remove("MCP_APP_TOKEN")
+        .args([
+            "call",
+            "get_leaderboard",
+            "--input",
+            r#"{"days":90}"#,
+            "--config",
+        ])
+        .arg(&cfg_path)
+        .output()
+        .await
+        .expect("run mcp call get_leaderboard");
+    assert!(lb_out.status.success());
+    let lb: Value = serde_json::from_slice(&lb_out.stdout).expect("parse leaderboard json");
+    assert_eq!(lb["totalRuns"], 2);
+    let sol = lb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.1-sol")
+        .expect("gpt-6.1-sol in leaderboard");
+    assert_eq!(sol["timedRuns"], 2); // 32s from spooled AR run + 35s from backfilled PT run
+    assert_eq!(sol["cherryPicks"], 1);
+
+    tdb.teardown().await;
+}
