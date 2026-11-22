@@ -51,7 +51,7 @@ export function AuthScreen() {
         <header class="auth-header">
           <div class="brand">
             <img class="brand-icon" src="/icon.svg" alt="" />
-            <span>Rust Home Server</span>
+            <span>Model Arena</span>
           </div>
           <h1 id="auth-heading">
             {isRegister() ? "Create household account" : "Sign in"}

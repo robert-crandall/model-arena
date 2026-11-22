@@ -17,24 +17,24 @@ setup: ## First run after cloning: frontend deps, .env, and an initial frontend 
 build: ## Build the Solid 2.0 SPA, then compile the release binary into bin/
 	cd web && bun run build
 	mkdir -p bin
-	cargo build --locked --release --bin rust-home-server
-	cp target/release/rust-home-server bin/rust-home-server
+	cargo build --locked --release --bin model-arena-rust
+	cp target/release/model-arena-rust bin/model-arena-rust
 
-install-mcp: ## Build and install rust-home-server-mcp into ~/bin
+install-mcp: ## Build and install model-arena-rust-mcp into ~/bin
 	mkdir -p "$(HOME)/bin"
-	cargo build --locked --release --bin rust-home-server-mcp
-	cp target/release/rust-home-server-mcp "$(HOME)/bin/rust-home-server-mcp"
-	@echo "installed $(HOME)/bin/rust-home-server-mcp"
+	cargo build --locked --release --bin model-arena-rust-mcp
+	cp target/release/model-arena-rust-mcp "$(HOME)/bin/model-arena-rust-mcp"
+	@echo "installed $(HOME)/bin/model-arena-rust-mcp"
 
-mcp-token: ## Sign in and mint an MCP token into ~/.config/rust-home-server.json
-	cargo run --locked --bin rust-home-server-mcp -- token
+mcp-token: ## Sign in and mint an MCP token into ~/.config/model-arena-rust.json
+	cargo run --locked --bin model-arena-rust-mcp -- token
 
 mcp-config: ## Print the local stdio MCP client configuration
-	@printf '{\n  "mcpServers": {\n    "rust-home-server": { "command": "%s/bin/rust-home-server-mcp", "args": ["serve"] }\n  }\n}\n' \
+	@printf '{\n  "mcpServers": {\n    "model-arena-rust": { "command": "%s/bin/model-arena-rust-mcp", "args": ["serve"] }\n  }\n}\n' \
 		"$(HOME)"
 
 run: ## Run the release binary built by `make build`
-	./bin/rust-home-server
+	./bin/model-arena-rust
 
 dev: ## Run Vite on :5173 with the Rust API server on :8080
 	@scripts/dev.sh

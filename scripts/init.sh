@@ -24,10 +24,10 @@ if [[ "$CRATE_SLUG" =~ ^[0-9] ]]; then
   CRATE_SLUG="_${CRATE_SLUG}"
 fi
 
-OLD_REPO="robert-crandall/rust-home-server"
-OLD_NAME="Rust Home Server"
-OLD_SLUG="rust-home-server"
-OLD_CRATE="rust_home_server"
+OLD_REPO="robert-crandall/model-arena-rust"
+OLD_NAME="Model Arena"
+OLD_SLUG="model-arena-rust"
+OLD_CRATE="model_arena_rust"
 
 NEW_REPO="${MODULE#github.com/}"
 
@@ -37,7 +37,10 @@ echo "  App Name   : $OLD_NAME -> $NAME"
 echo "  Slug       : $OLD_SLUG -> $SLUG"
 echo "  Crate/DB   : $OLD_CRATE -> $CRATE_SLUG"
 
-mapfile -t FILES < <(git ls-files | grep -Ev '^(scripts/init\.sh|docs/tech-stack\.md)$')
+FILES=()
+while IFS= read -r file; do
+  FILES+=("$file")
+done < <(git ls-files | grep -Ev '^(scripts/init\.sh|docs/tech-stack\.md)$')
 
 OLD_REPO="$OLD_REPO" NEW_REPO="$NEW_REPO" \
 OLD_NAME="$OLD_NAME" NAME="$NAME" \

@@ -1852,7 +1852,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-home-server"
+name = "model-arena-rust"
 version = "0.1.0"
 dependencies = [
  "argon2",

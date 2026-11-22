@@ -64,7 +64,7 @@ fn publish_plan_script_matrix() {
             name: "green push CI at main tip publishes and promotes",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "Robert-Crandall/Rust-Home-Server"),
+                ("REPOSITORY", "robert-crandall/model-arena-rust"),
                 ("RUN_EVENT", "push"),
                 ("RUN_CONCLUSION", "success"),
                 ("RUN_HEAD_SHA", sha),
@@ -80,7 +80,7 @@ fn publish_plan_script_matrix() {
             name: "pull_request CI run never publishes even if tip matches",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "robert-crandall/rust-home-server"),
+                ("REPOSITORY", "robert-crandall/model-arena-rust"),
                 ("RUN_EVENT", "pull_request"),
                 ("RUN_CONCLUSION", "success"),
                 ("RUN_HEAD_SHA", sha),
@@ -96,7 +96,7 @@ fn publish_plan_script_matrix() {
             name: "stale main CI run declines when main moved",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "robert-crandall/rust-home-server"),
+                ("REPOSITORY", "robert-crandall/model-arena-rust"),
                 ("RUN_EVENT", "push"),
                 ("RUN_CONCLUSION", "success"),
                 ("RUN_HEAD_SHA", sha),
@@ -112,7 +112,7 @@ fn publish_plan_script_matrix() {
             name: "failed CI run declines",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "robert-crandall/rust-home-server"),
+                ("REPOSITORY", "robert-crandall/model-arena-rust"),
                 ("RUN_EVENT", "push"),
                 ("RUN_CONCLUSION", "failure"),
                 ("RUN_HEAD_SHA", sha),
@@ -128,7 +128,7 @@ fn publish_plan_script_matrix() {
             name: "version tag push publishes immutable tag without moving main",
             env: vec![
                 ("EVENT_NAME", "push"),
-                ("REPOSITORY", "robert-crandall/rust-home-server"),
+                ("REPOSITORY", "robert-crandall/model-arena-rust"),
                 ("GITHUB_REF", "refs/tags/v0.2.0"),
                 ("SHA", sha),
             ],
@@ -142,7 +142,7 @@ fn publish_plan_script_matrix() {
             name: "workflow_dispatch on main publishes and promotes",
             env: vec![
                 ("EVENT_NAME", "workflow_dispatch"),
-                ("REPOSITORY", "robert-crandall/rust-home-server"),
+                ("REPOSITORY", "robert-crandall/model-arena-rust"),
                 ("GITHUB_REF", "refs/heads/main"),
                 ("SHA", sha),
             ],
@@ -156,7 +156,7 @@ fn publish_plan_script_matrix() {
             name: "workflow_dispatch on feature branch is rejected",
             env: vec![
                 ("EVENT_NAME", "workflow_dispatch"),
-                ("REPOSITORY", "robert-crandall/rust-home-server"),
+                ("REPOSITORY", "robert-crandall/model-arena-rust"),
                 ("GITHUB_REF", "refs/heads/feature-branch"),
                 ("SHA", sha),
             ],
@@ -190,7 +190,7 @@ fn publish_plan_script_matrix() {
 
         assert_eq!(
             parsed.get("image").copied(),
-            Some("ghcr.io/robert-crandall/rust-home-server"),
+            Some("ghcr.io/robert-crandall/model-arena-rust"),
             "case '{}': image must be lowercased",
             tc.name
         );
@@ -511,7 +511,7 @@ impl TestDb {
         };
 
         let mut parsed = url::Url::parse(&base_url).expect("parse TEST_DATABASE_URL");
-        let db_name = format!("rust_home_server_test_{}", Uuid::new_v4().simple());
+        let db_name = format!("model_arena_rust_test_{}", Uuid::new_v4().simple());
 
         let mut admin_conn = PgConnection::connect(parsed.as_str())
             .await
@@ -843,7 +843,7 @@ async fn multi_user_auth_csrf_and_tokens_flow() {
         .next()
         .unwrap()
         .to_string();
-    assert!(set_cookie.starts_with("rust_home_server_session="));
+    assert!(set_cookie.starts_with("model_arena_rust_session="));
 
     sqlx::query("UPDATE sessions SET expires_at = now() + interval '5 days'")
         .execute(&tdb.pool)
@@ -924,12 +924,12 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         return;
     };
 
-    // Reserve a free port for the compiled `rust-home-server` server binary
+    // Reserve a free port for the compiled `model-arena-rust` server binary
     let probe = StdTcpListener::bind("127.0.0.1:0").expect("reserve port");
     let addr = probe.local_addr().expect("local addr");
     drop(probe);
 
-    let server_bin = env!("CARGO_BIN_EXE_rust-home-server");
+    let server_bin = env!("CARGO_BIN_EXE_model-arena-rust");
     let mut server_child = Command::new(server_bin)
         .env("DATABASE_URL", &tdb.db_url)
         .env("ADDR", addr.to_string())
@@ -939,7 +939,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .expect("spawn rust-home-server binary");
+        .expect("spawn model-arena-rust binary");
 
     let base_url = format!("http://{addr}");
     let http = reqwest::Client::builder()
@@ -959,7 +959,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
     }
     assert!(
         healthy,
-        "rust-home-server binary did not become healthy on {base_url}"
+        "model-arena-rust binary did not become healthy on {base_url}"
     );
 
     // 1. Embedded Solid 2.0 SPA assets + client-side route fallback + API 404 boundary
@@ -985,16 +985,16 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         .unwrap();
     assert_eq!(api_404.status(), StatusCode::NOT_FOUND);
 
-    // 2. Built-in container healthcheck subcommand (`rust-home-server healthcheck`)
+    // 2. Built-in container healthcheck subcommand (`model-arena-rust healthcheck`)
     let hc_status = Command::new(server_bin)
         .arg("healthcheck")
         .env("ADDR", addr.to_string())
         .status()
         .await
-        .expect("run rust-home-server healthcheck");
-    assert!(hc_status.success(), "rust-home-server healthcheck failed");
+        .expect("run model-arena-rust healthcheck");
+    assert!(hc_status.success(), "model-arena-rust healthcheck failed");
 
-    // 3. Register two household users, mint MCP config (0600), and exercise rust-home-server-mcp over stdio
+    // 3. Register two household users, mint MCP config (0600), and exercise model-arena-rust-mcp over stdio
     let reg = http
         .post(format!("{base_url}/api/auth/register"))
         .json(&json!({
@@ -1029,8 +1029,8 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
     .expect("mint token via login");
 
     let temp_dir =
-        std::env::temp_dir().join(format!("rust-home-server-mcp-test-{}", Uuid::new_v4()));
-    let cfg_path = temp_dir.join("rust-home-server.json");
+        std::env::temp_dir().join(format!("model-arena-rust-mcp-test-{}", Uuid::new_v4()));
+    let cfg_path = temp_dir.join("model-arena-rust.json");
     let cfg = ClientConfig {
         app_url: base_url.clone(),
         token: minted.token.clone(),
@@ -1048,8 +1048,8 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         );
     }
 
-    // Invoke `rust-home-server-mcp --config <path>` without `serve` to verify default subcommand dispatch
-    let mcp_bin = env!("CARGO_BIN_EXE_rust-home-server-mcp");
+    // Invoke `model-arena-rust-mcp --config <path>` without `serve` to verify default subcommand dispatch
+    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-rust-mcp");
     let mut mcp_child = Command::new(mcp_bin)
         .arg("--config")
         .arg(&cfg_path)
@@ -1060,7 +1060,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .expect("spawn rust-home-server-mcp");
+        .expect("spawn model-arena-rust-mcp");
 
     let mut mcp_stdin = mcp_child.stdin.take().unwrap();
     let mut mcp_lines = BufReader::new(mcp_child.stdout.take().unwrap()).lines();
@@ -1091,7 +1091,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
     assert_eq!(init_resp["id"], 1);
     assert_eq!(
         init_resp["result"]["serverInfo"]["name"],
-        "rust-home-server-mcp"
+        "model-arena-rust-mcp"
     );
 
     // JSON-RPC notification: notifications/initialized

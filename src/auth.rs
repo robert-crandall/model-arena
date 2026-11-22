@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use crate::routes::{ApiError, AppState};
 
-pub const SESSION_COOKIE_NAME: &str = "rust_home_server_session";
+pub const SESSION_COOKIE_NAME: &str = "model_arena_rust_session";
 pub const SESSION_TTL_DAYS: i64 = 30;
 pub const SESSION_RENEW_THRESHOLD_DAYS: i64 = 15;
 const MIN_PASSWORD_LEN: usize = 8;
@@ -37,7 +37,7 @@ static PASSWORD_SEMAPHORE: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(MAX_CONCURRENT_PASSWORD_JOBS)));
 
 static DUMMY_PASSWORD_HASH: LazyLock<String> = LazyLock::new(|| {
-    hash_password_sync("rust-home-server-dummy-timing-equalizer")
+    hash_password_sync("model-arena-rust-dummy-timing-equalizer")
         .expect("dummy Argon2id password hash must build")
 });
 

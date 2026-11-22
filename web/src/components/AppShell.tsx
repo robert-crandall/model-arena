@@ -112,7 +112,7 @@ export function AppShell(props: { user: User }) {
         <div class="topbar-inner">
           <div class="brand">
             <img class="brand-icon" src="/icon.svg" alt="" />
-            <span>Rust Home Server</span>
+            <span>Model Arena</span>
           </div>
 
           <div class="topbar-actions">
@@ -142,7 +142,7 @@ export function AppShell(props: { user: User }) {
 
         <section class="surface-card" aria-labelledby="focus-heading">
           <span class="eyebrow">Household workspace</span>
-          <h1 id="focus-heading">Ready for Rust Home Server</h1>
+          <h1 id="focus-heading">Ready for Model Arena</h1>
           <p class="lead-copy">
             Signed in as <strong>{displayName()}</strong>. Household accounts
             share one workspace while keeping per-user authentication and API
@@ -154,14 +154,14 @@ export function AppShell(props: { user: User }) {
           <summary>
             <span>AI &amp; API access</span>
             <span class="disclosure-hint">
-              Personal access tokens for rust-home-server-mcp
+              Personal access tokens for model-arena-rust-mcp
             </span>
           </summary>
 
           <div class="disclosure-body">
             <p class="lead-copy">
               Run <code>make mcp-token</code> on your workstation or mint a
-              personal access token below for <code>rust-home-server-mcp</code>.
+              personal access token below for <code>model-arena-rust-mcp</code>.
             </p>
 
             <Show when={tokenError()}>

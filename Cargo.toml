@@ -1,16 +1,16 @@
 [package]
-name = "rust-home-server"
+name = "model-arena-rust"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-default-run = "rust-home-server"
+default-run = "model-arena-rust"
 
 [lib]
 name = "app"
 path = "src/lib.rs"
 
 [[bin]]
-name = "rust-home-server"
+name = "model-arena-rust"
 path = "src/bin/server.rs"
 
 [[bin]]
@@ -18,7 +18,7 @@ name = "openapi"
 path = "src/bin/openapi.rs"
 
 [[bin]]
-name = "rust-home-server-mcp"
+name = "model-arena-rust-mcp"
 path = "src/bin/mcp.rs"
 
 [dependencies]

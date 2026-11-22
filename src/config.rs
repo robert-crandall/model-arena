@@ -136,7 +136,7 @@ mod tests {
 
         vars.insert(
             "DATABASE_URL".into(),
-            "postgres://localhost/rust_home_server".into(),
+            "postgres://localhost/model_arena_rust".into(),
         );
         let cfg = Config::from_map(&vars).unwrap();
         assert!(!cfg.secure_cookies);

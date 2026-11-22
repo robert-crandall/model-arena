@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::auth::{CreatedApiToken, User};
 use crate::routes::{CreateTokenRequest, ErrorBody, LoginRequest};
 
-pub const APP_SLUG: &str = "rust-home-server";
+pub const APP_SLUG: &str = "model-arena-rust";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -65,7 +65,7 @@ impl ClientConfig {
             .map(|v| v.trim().trim_end_matches('/').to_string())
             .filter(|v| !v.is_empty())
             .ok_or_else(|| {
-                "missing appUrl (set MCP_APP_URL or run `make mcp-token` to write ~/.config/rust-home-server.json)".to_string()
+                "missing appUrl (set MCP_APP_URL or run `make mcp-token` to write ~/.config/model-arena-rust.json)".to_string()
             })?;
 
         validate_base_url(&app_url)?;
@@ -75,7 +75,7 @@ impl ClientConfig {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
             .ok_or_else(|| {
-                "missing token (set MCP_APP_TOKEN or run `make mcp-token` to write ~/.config/rust-home-server.json)".to_string()
+                "missing token (set MCP_APP_TOKEN or run `make mcp-token` to write ~/.config/model-arena-rust.json)".to_string()
             })?;
 
         Ok(Self { app_url, token })
@@ -93,7 +93,7 @@ impl ClientConfig {
             ".{}.tmp.{}",
             path.file_name()
                 .and_then(|n| n.to_str())
-                .unwrap_or("rust-home-server.json"),
+                .unwrap_or("model-arena-rust.json"),
             Uuid::new_v4()
         ));
 
@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn rejects_unknown_fields_in_config_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("rust-home-server.json");
+        let path = dir.path().join("model-arena-rust.json");
         fs::write(
             &path,
             r#"{"appUrl":"http://localhost:8080","token":"pat_x_y","typo":true}"#,
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn writes_atomic_0600_config() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested").join("rust-home-server.json");
+        let path = dir.path().join("nested").join("model-arena-rust.json");
         let cfg = ClientConfig {
             app_url: "http://127.0.0.1:8080".to_string(),
             token: "pat_00000000-0000-0000-0000-000000000000_secret".to_string(),
@@ -335,8 +335,8 @@ mod tests {
         for bad in [
             "http://localhost:8080/#focus",
             "http://localhost:8080?view=focus",
-            "https://rust-home-server.home/?",
-            "https://rust-home-server.home/#",
+            "https://model-arena-rust.home/?",
+            "https://model-arena-rust.home/#",
         ] {
             let cfg = ClientConfig {
                 app_url: bad.to_string(),

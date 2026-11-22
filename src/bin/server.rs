@@ -58,7 +58,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    tracing::info!(addr = %cfg.listen_addr, "rust-home-server server listening");
+    tracing::info!(addr = %cfg.listen_addr, "model-arena-rust server listening");
 
     if let Err(err) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

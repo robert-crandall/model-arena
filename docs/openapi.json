@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Rust Home Server API",
+    "title": "Model Arena API",
     "description": "Self-hosted homelab web portal and MCP backend.",
     "license": {
       "name": ""
@@ -661,7 +661,7 @@
       "sessionCookie": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "rust_home_server_session"
+        "name": "model_arena_rust_session"
       }
     }
   },

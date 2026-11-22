@@ -162,7 +162,7 @@ impl Modify for SecurityAddon {
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "Rust Home Server API",
+        title = "Model Arena API",
         version = "0.1.0",
         description = "Self-hosted homelab web portal and MCP backend."
     ),

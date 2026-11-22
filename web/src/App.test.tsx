@@ -33,7 +33,7 @@ function setInputValue(input: HTMLInputElement, value: string) {
   flush();
 }
 
-describe("Rust Home Server SPA foundation", () => {
+describe("Model Arena SPA foundation", () => {
   let currentUser: User | null;
   let registrationOpen: boolean;
   let tokens: ApiToken[];
@@ -226,7 +226,7 @@ describe("Rust Home Server SPA foundation", () => {
 
     await waitFor(() => {
       expect(host.querySelector("h1")?.textContent).toBe(
-        "Ready for Rust Home Server",
+        "Ready for Model Arena",
       );
       expect(host.textContent).toContain("Signed in as Dad");
     });
@@ -274,7 +274,7 @@ describe("Rust Home Server SPA foundation", () => {
 
     await waitFor(() => {
       expect(host.querySelector("h1")?.textContent).toBe(
-        "Ready for Rust Home Server",
+        "Ready for Model Arena",
       );
     });
 
@@ -299,7 +299,7 @@ describe("Rust Home Server SPA foundation", () => {
 
     setInputValue(
       host.querySelector("#new-token-name") as HTMLInputElement,
-      "rust-home-server-mcp",
+      "model-arena-rust-mcp",
     );
     details
       .querySelector("form")!
@@ -310,7 +310,7 @@ describe("Rust Home Server SPA foundation", () => {
         "pat_00000000-0000-0000-0000-000000000099_secret_a1b2",
       );
       expect(host.querySelector(".token-name")?.textContent).toBe(
-        "rust-home-server-mcp",
+        "model-arena-rust-mcp",
       );
     });
 
@@ -374,7 +374,7 @@ describe("Rust Home Server SPA foundation", () => {
 
     await waitFor(() => {
       expect(host.querySelector("h1")?.textContent).toBe(
-        "Ready for Rust Home Server",
+        "Ready for Model Arena",
       );
     });
 
@@ -431,7 +431,7 @@ describe("Rust Home Server SPA foundation", () => {
     await waitFor(() => {
       expect(host.textContent).toContain("session store unavailable");
       expect(host.querySelector("h1")?.textContent).toBe(
-        "Ready for Rust Home Server",
+        "Ready for Model Arena",
       );
     });
   });
@@ -459,7 +459,7 @@ describe("Rust Home Server SPA foundation", () => {
 
     await waitFor(() => {
       expect(host.querySelector("h1")?.textContent).toBe(
-        "Ready for Rust Home Server",
+        "Ready for Model Arena",
       );
       expect(host.textContent).toContain("Signed in as Leo");
     });

@@ -24,7 +24,7 @@ impl AppMcp {
     }
 
     #[tool(
-        description = "Verify connectivity to the Rust Home Server homelab portal and return the signed-in household user."
+        description = "Verify connectivity to the Model Arena homelab portal and return the signed-in household user."
     )]
     async fn whoami(&self) -> Result<CallToolResult, McpError> {
         match self.client.me().await {
@@ -38,7 +38,7 @@ impl AppMcp {
     }
 
     #[tool(
-        description = "List household members on this Rust Home Server server so AI harnesses can reference shared household users."
+        description = "List household members on this Model Arena server so AI harnesses can reference shared household users."
     )]
     async fn list_users(&self) -> Result<CallToolResult, McpError> {
         match self.client.list_users().await {
@@ -61,7 +61,7 @@ impl ServerHandler for AppMcp {
                 env!("CARGO_PKG_VERSION"),
             ))
             .with_instructions(
-                "Rust Home Server homelab MCP server. Connects to the household Rust Home Server API using personal access tokens.",
+                "Model Arena homelab MCP server. Connects to the household Model Arena API using personal access tokens.",
             )
     }
 }
@@ -77,14 +77,14 @@ async fn main() -> ExitCode {
                 &args[..]
             };
             if let Err(err) = run_serve(rest).await {
-                eprintln!("rust-home-server-mcp error: {err}");
+                eprintln!("model-arena-rust-mcp error: {err}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
         }
         Some("token") => {
             if let Err(err) = run_token(&args[1..]).await {
-                eprintln!("rust-home-server-mcp token error: {err}");
+                eprintln!("model-arena-rust-mcp token error: {err}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
@@ -104,8 +104,8 @@ async fn main() -> ExitCode {
 fn print_usage() {
     eprintln!(
         "Usage:
-  rust-home-server-mcp [serve] [--config <path>]
-  rust-home-server-mcp token [--url <app-url>] [--email <email>] [--name <token-name>] [--config <path>]"
+  model-arena-rust-mcp [serve] [--config <path>]
+  model-arena-rust-mcp token [--url <app-url>] [--email <email>] [--name <token-name>] [--config <path>]"
     );
 }
 

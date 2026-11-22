@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "rust-home-server": { "command": "rust-home-server-mcp", "args": ["serve"] }
+    "model-arena-rust": { "command": "model-arena-rust-mcp", "args": ["serve"] }
   }
 }

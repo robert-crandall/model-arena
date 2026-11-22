@@ -25,9 +25,9 @@ COPY src ./src
 COPY --from=web-build /src/web/build ./web/build
 
 RUN mkdir -p /out \
-    && cargo build --locked --release --bin rust-home-server \
-    && strip target/release/rust-home-server \
-    && cp target/release/rust-home-server /out/app
+    && cargo build --locked --release --bin model-arena-rust \
+    && strip target/release/model-arena-rust \
+    && cp target/release/model-arena-rust /out/app
 
 # --- 3. Distroless nonroot runtime ---
 FROM gcr.io/distroless/cc-debian12:nonroot
