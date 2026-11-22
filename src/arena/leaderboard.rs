@@ -6,10 +6,11 @@ use uuid::Uuid;
 
 use crate::arena::service::{list_roster, list_trials};
 use crate::arena::types::{
-    HostBiasCell, Leaderboard, LeaderboardQuery, LensCell, ModelScorecard, RecentRunView,
-    RosterEntry, RunCandidateView, RunLegView, SKILL_ADVERSARIAL_REVIEW, SKILL_PLAN_TOURNAMENT,
-    TOURNAMENT_LENSES, Trial, TrialComparison, infer_lineage, is_trial_competing_role,
-    is_valid_skill,
+    CodingLeaderboard, CodingLeaderboardQuery, CodingModelProfile, CodingRunRecord,
+    CodingSliceCell, HostBiasCell, Leaderboard, LeaderboardQuery, LensCell, ModelScorecard,
+    RecentRunView, RosterEntry, RunCandidateView, RunLegView, SKILL_ADVERSARIAL_REVIEW,
+    SKILL_PLAN_TOURNAMENT, TOURNAMENT_LENSES, Trial, TrialComparison, VALID_SIZE_BUCKETS,
+    VALID_TASK_KINDS, infer_lineage, is_trial_competing_role, is_valid_skill,
 };
 use crate::routes::ApiError;
 
@@ -1021,6 +1022,303 @@ pub(crate) fn percentile_ms(sorted: &[i32], pct: usize) -> i32 {
 
 pub(crate) fn round3(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
+}
+
+fn effective_coding_outcomes(r: &CodingRunRecord) -> (bool, bool, bool) {
+    match r.human_override.as_str() {
+        "overturned" => (true, false, false),
+        "confirmed" => (false, r.first_pass_clean && !r.abandoned, !r.abandoned),
+        _ => (
+            r.escaped_regression,
+            r.first_pass_clean && !r.escaped_regression && !r.abandoned,
+            r.merged_without_followup_24h && !r.escaped_regression && !r.abandoned,
+        ),
+    }
+}
+
+pub async fn get_coding_leaderboard(
+    pool: &PgPool,
+    user_id: Uuid,
+    query: CodingLeaderboardQuery,
+) -> Result<CodingLeaderboard, ApiError> {
+    let days = query.days.unwrap_or(90);
+    if !(1..=3650).contains(&days) {
+        return Err(ApiError::bad_request("days must be between 1 and 3650"));
+    }
+
+    let task_kind_filter = query
+        .task_kind
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !task_kind_filter.is_empty() && !VALID_TASK_KINDS.contains(&task_kind_filter.as_str()) {
+        return Err(ApiError::bad_request(format!(
+            "invalid taskKind {:?}: must be one of {:?}",
+            task_kind_filter, VALID_TASK_KINDS
+        )));
+    }
+
+    let size_bucket_filter = query
+        .size_bucket
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    if !size_bucket_filter.is_empty() && !VALID_SIZE_BUCKETS.contains(&size_bucket_filter.as_str())
+    {
+        return Err(ApiError::bad_request(format!(
+            "invalid sizeBucket {:?}: must be one of {:?}",
+            size_bucket_filter, VALID_SIZE_BUCKETS
+        )));
+    }
+
+    let repo_filter = query.repo.as_deref().map(str::trim).unwrap_or("");
+
+    let now = Utc::now();
+    let window_until = query.to.unwrap_or(now);
+    let window_since = query
+        .from
+        .unwrap_or_else(|| window_until - Duration::days(i64::from(days)));
+    if window_until <= window_since {
+        return Err(ApiError::bad_request("to must be after from"));
+    }
+    let effective_window_days = if query.from.is_some() || query.to.is_some() {
+        (((window_until - window_since).num_seconds() as f64) / 86_400.0)
+            .ceil()
+            .clamp(1.0, 3650.0) as i32
+    } else {
+        days
+    };
+
+    let roster = list_roster(pool, user_id, None).await?;
+
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT id, run_key, model, lineage, harness, repo, pr_number, issue_ref,
+                task_kind, loc_added, loc_deleted, size_bucket, files_changed, tests_delta,
+                prompt_turn_count, red_ci_pushes, ccr_rounds, ccr_actionable_count, ccr_noise_count,
+                human_threads_count, escaped_regression, merged_without_followup_24h, first_pass_clean,
+                abandoned, time_to_green_sec, time_to_merge_sec, digest_summary,
+                human_override, override_note, occurred_at, recorded_at
+         FROM arena_coding_runs
+         WHERE user_id = ",
+    );
+    qb.push_bind(user_id);
+    qb.push(" AND occurred_at >= ");
+    qb.push_bind(window_since);
+    qb.push(" AND occurred_at <= ");
+    qb.push_bind(window_until);
+
+    if !repo_filter.is_empty() {
+        qb.push(" AND repo = ");
+        qb.push_bind(repo_filter);
+    }
+    if !task_kind_filter.is_empty() {
+        qb.push(" AND task_kind = ");
+        qb.push_bind(&task_kind_filter);
+    }
+    if !size_bucket_filter.is_empty() {
+        qb.push(" AND size_bucket = ");
+        qb.push_bind(&size_bucket_filter);
+    }
+    qb.push(" ORDER BY occurred_at DESC, id DESC");
+
+    let runs: Vec<CodingRunRecord> = qb.build_query_as().fetch_all(pool).await.map_err(|err| {
+        tracing::error!(?err, "failed to query coding runs for leaderboard");
+        ApiError::internal("failed to load coding leaderboard")
+    })?;
+
+    #[derive(Default)]
+    struct ModelAccum {
+        lineage: String,
+        total_runs: i32,
+        merged_runs: i32,
+        abandoned_runs: i32,
+        zero_touch_runs: i32,
+        first_pass_clean_runs: i32,
+        merged_clean_24h_runs: i32,
+        escaped_regressions: i32,
+        total_prompt_turns: i64,
+        total_red_ci_pushes: i64,
+        total_ccr_rounds: i64,
+        total_ccr_actionable: i64,
+        total_ccr_noise: i64,
+        total_human_threads: i64,
+        total_loc_churn: i64,
+        total_tests_delta: i64,
+        green_secs: Vec<i32>,
+        merge_secs: Vec<i32>,
+    }
+
+    #[derive(Default)]
+    struct SliceAccum {
+        runs: i32,
+        zero_touch_runs: i32,
+        first_pass_clean_runs: i32,
+        escaped_regressions: i32,
+        total_ccr_rounds: i64,
+        merge_secs: Vec<i32>,
+    }
+
+    let mut by_model: HashMap<String, ModelAccum> = HashMap::new();
+    let mut by_slice: HashMap<(String, String, String), SliceAccum> = HashMap::new();
+
+    for r in &runs {
+        let (eff_escaped, eff_first_pass_clean, eff_merged_clean_24h) =
+            effective_coding_outcomes(r);
+        let is_zero_touch = !r.abandoned && !eff_escaped && r.prompt_turn_count <= 1;
+
+        let m = by_model.entry(r.model.clone()).or_default();
+        if m.lineage.is_empty() {
+            m.lineage = if r.lineage.is_empty() {
+                infer_lineage(&r.model, &roster)
+            } else {
+                r.lineage.clone()
+            };
+        }
+        m.total_runs += 1;
+        if r.abandoned {
+            m.abandoned_runs += 1;
+        } else {
+            m.merged_runs += 1;
+        }
+        if is_zero_touch {
+            m.zero_touch_runs += 1;
+        }
+        if eff_first_pass_clean {
+            m.first_pass_clean_runs += 1;
+        }
+        if eff_merged_clean_24h {
+            m.merged_clean_24h_runs += 1;
+        }
+        if eff_escaped {
+            m.escaped_regressions += 1;
+        }
+        m.total_prompt_turns += i64::from(r.prompt_turn_count);
+        m.total_red_ci_pushes += i64::from(r.red_ci_pushes);
+        m.total_ccr_rounds += i64::from(r.ccr_rounds);
+        m.total_ccr_actionable += i64::from(r.ccr_actionable_count);
+        m.total_ccr_noise += i64::from(r.ccr_noise_count);
+        m.total_human_threads += i64::from(r.human_threads_count);
+        m.total_loc_churn += i64::from(r.loc_added) + i64::from(r.loc_deleted);
+        m.total_tests_delta += i64::from(r.tests_delta);
+        if r.time_to_green_sec > 0 {
+            m.green_secs.push(r.time_to_green_sec);
+        }
+        if !r.abandoned && r.time_to_merge_sec > 0 {
+            m.merge_secs.push(r.time_to_merge_sec);
+        }
+
+        let s = by_slice
+            .entry((r.model.clone(), r.size_bucket.clone(), r.task_kind.clone()))
+            .or_default();
+        s.runs += 1;
+        if is_zero_touch {
+            s.zero_touch_runs += 1;
+        }
+        if eff_first_pass_clean {
+            s.first_pass_clean_runs += 1;
+        }
+        if eff_escaped {
+            s.escaped_regressions += 1;
+        }
+        s.total_ccr_rounds += i64::from(r.ccr_rounds);
+        if !r.abandoned && r.time_to_merge_sec > 0 {
+            s.merge_secs.push(r.time_to_merge_sec);
+        }
+    }
+
+    let mut models: Vec<CodingModelProfile> = by_model
+        .into_iter()
+        .map(|(model, mut acc)| {
+            acc.green_secs.sort_unstable();
+            acc.merge_secs.sort_unstable();
+            let n = f64::from(acc.total_runs);
+            let total_ccr_comments = acc.total_ccr_actionable + acc.total_ccr_noise;
+            let ccr_noise_ratio = if total_ccr_comments > 0 {
+                round3((acc.total_ccr_noise as f64) / (total_ccr_comments as f64))
+            } else {
+                0.0
+            };
+
+            CodingModelProfile {
+                model,
+                lineage: acc.lineage,
+                total_runs: acc.total_runs,
+                merged_runs: acc.merged_runs,
+                abandoned_runs: acc.abandoned_runs,
+                zero_touch_runs: acc.zero_touch_runs,
+                zero_touch_rate: round3(f64::from(acc.zero_touch_runs) / n),
+                first_pass_clean_runs: acc.first_pass_clean_runs,
+                first_pass_clean_rate: round3(f64::from(acc.first_pass_clean_runs) / n),
+                merged_clean_24h_runs: acc.merged_clean_24h_runs,
+                merged_clean_24h_rate: round3(f64::from(acc.merged_clean_24h_runs) / n),
+                escaped_regressions: acc.escaped_regressions,
+                escaped_regression_rate: round3(f64::from(acc.escaped_regressions) / n),
+                avg_prompt_turns: round3(acc.total_prompt_turns as f64 / n),
+                avg_red_ci_pushes: round3(acc.total_red_ci_pushes as f64 / n),
+                avg_ccr_rounds: round3(acc.total_ccr_rounds as f64 / n),
+                total_ccr_actionable: acc.total_ccr_actionable.clamp(0, i64::from(i32::MAX)) as i32,
+                total_ccr_noise: acc.total_ccr_noise.clamp(0, i64::from(i32::MAX)) as i32,
+                ccr_noise_ratio,
+                total_human_threads: acc.total_human_threads.clamp(0, i64::from(i32::MAX)) as i32,
+                avg_human_threads: round3(acc.total_human_threads as f64 / n),
+                avg_loc_churn: (acc.total_loc_churn / i64::from(acc.total_runs))
+                    .clamp(0, i64::from(i32::MAX)) as i32,
+                avg_tests_delta: round3(acc.total_tests_delta as f64 / n),
+                p50_time_to_green_sec: median_ms(&acc.green_secs),
+                p90_time_to_green_sec: percentile_ms(&acc.green_secs, 90),
+                p50_time_to_merge_sec: median_ms(&acc.merge_secs),
+                p90_time_to_merge_sec: percentile_ms(&acc.merge_secs, 90),
+            }
+        })
+        .collect();
+
+    models.sort_by(|a, b| {
+        b.merged_clean_24h_rate
+            .total_cmp(&a.merged_clean_24h_rate)
+            .then_with(|| b.zero_touch_rate.total_cmp(&a.zero_touch_rate))
+            .then_with(|| b.first_pass_clean_rate.total_cmp(&a.first_pass_clean_rate))
+            .then_with(|| b.total_runs.cmp(&a.total_runs))
+            .then_with(|| a.model.cmp(&b.model))
+    });
+
+    let mut slices: Vec<CodingSliceCell> = by_slice
+        .into_iter()
+        .map(|((model, size_bucket, task_kind), mut acc)| {
+            acc.merge_secs.sort_unstable();
+            let n = f64::from(acc.runs);
+            CodingSliceCell {
+                model,
+                size_bucket,
+                task_kind,
+                runs: acc.runs,
+                zero_touch_rate: round3(f64::from(acc.zero_touch_runs) / n),
+                first_pass_clean_rate: round3(f64::from(acc.first_pass_clean_runs) / n),
+                escaped_regression_rate: round3(f64::from(acc.escaped_regressions) / n),
+                avg_ccr_rounds: round3(acc.total_ccr_rounds as f64 / n),
+                p50_time_to_merge_sec: median_ms(&acc.merge_secs),
+            }
+        })
+        .collect();
+
+    slices.sort_by(|a, b| {
+        a.model
+            .cmp(&b.model)
+            .then_with(|| a.size_bucket.cmp(&b.size_bucket))
+            .then_with(|| a.task_kind.cmp(&b.task_kind))
+    });
+
+    let total_runs = runs.len() as i32;
+    let recent_runs = runs.into_iter().take(25).collect();
+
+    Ok(CodingLeaderboard {
+        window_days: effective_window_days,
+        total_runs,
+        models,
+        slices,
+        recent_runs,
+    })
 }
 
 #[cfg(test)]

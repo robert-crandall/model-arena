@@ -5,11 +5,13 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::arena::types::{
-    DecideTrialInput, OverrideCandidateInput, OverrideCandidateResponse, PanelLeg, PanelSelection,
-    RecordRunInput, RecordedRunOutput, RosterEntry, RosterSlotInput, SKILL_ADVERSARIAL_REVIEW,
-    SKILL_PLAN_TOURNAMENT, SelectPanelInput, StartTrialInput, TOURNAMENT_LENSES, Trial,
-    VALID_APPROACH_VERDICTS, VALID_CANDIDATE_DISPOSITIONS, VALID_CANDIDATE_SEVERITIES,
-    VALID_LEG_ROLES, VALID_LEG_STATUSES, VALID_PHASES, VALID_WINNING_ROLES, derive_candidate_keys,
+    CodingRunInput, DecideTrialInput, OverrideCandidateInput, OverrideCandidateResponse,
+    OverrideCodingRunInput, OverrideCodingRunResponse, PanelLeg, PanelSelection, RecordRunInput,
+    RecordedCodingRunOutput, RecordedRunOutput, RosterEntry, RosterSlotInput,
+    SKILL_ADVERSARIAL_REVIEW, SKILL_PLAN_TOURNAMENT, SelectPanelInput, StartTrialInput,
+    TOURNAMENT_LENSES, Trial, VALID_APPROACH_VERDICTS, VALID_CANDIDATE_DISPOSITIONS,
+    VALID_CANDIDATE_SEVERITIES, VALID_LEG_ROLES, VALID_LEG_STATUSES, VALID_PHASES,
+    VALID_TASK_KINDS, VALID_WINNING_ROLES, classify_size_bucket, derive_candidate_keys,
     infer_lineage, is_trial_competing_role, is_valid_artifact_kind, is_valid_skill,
 };
 use crate::auth::random_hex_secret;
@@ -1476,6 +1478,338 @@ pub async fn override_candidate(
 
     Ok(OverrideCandidateResponse {
         id: candidate_id,
+        human_override: stored.to_string(),
+    })
+}
+
+fn validate_and_normalize_coding_run_input(input: &mut CodingRunInput) -> Result<String, ApiError> {
+    input.run_key = input.run_key.trim().to_string();
+    if input.run_key.is_empty() || input.run_key.len() > 256 {
+        return Err(ApiError::bad_request(
+            "runKey must be between 1 and 256 characters",
+        ));
+    }
+
+    input.model = input.model.trim().to_string();
+    if input.model.is_empty() || input.model.len() > 128 {
+        return Err(ApiError::bad_request(
+            "model must be between 1 and 128 characters",
+        ));
+    }
+
+    input.lineage = input.lineage.trim().to_ascii_lowercase();
+    if input.lineage.len() > 128 {
+        return Err(ApiError::bad_request(
+            "lineage must be at most 128 characters",
+        ));
+    }
+
+    input.harness = input.harness.trim().to_string();
+    if input.harness.len() > 128 {
+        return Err(ApiError::bad_request(
+            "harness must be at most 128 characters",
+        ));
+    }
+
+    input.repo = input.repo.trim().to_string();
+    if input.repo.len() > 256 {
+        return Err(ApiError::bad_request("repo must be at most 256 characters"));
+    }
+
+    if input.pr_number < 0 {
+        return Err(ApiError::bad_request("prNumber cannot be negative"));
+    }
+
+    input.issue_ref = input.issue_ref.trim().to_string();
+    if input.issue_ref.len() > 256 {
+        return Err(ApiError::bad_request(
+            "issueRef must be at most 256 characters",
+        ));
+    }
+
+    input.task_kind = input.task_kind.trim().to_ascii_lowercase();
+    if input.task_kind.is_empty() {
+        input.task_kind = "feature".to_string();
+    } else if !VALID_TASK_KINDS.contains(&input.task_kind.as_str()) {
+        return Err(ApiError::bad_request(format!(
+            "invalid taskKind {:?}: must be one of {:?}",
+            input.task_kind, VALID_TASK_KINDS
+        )));
+    }
+
+    if !(0..=1_000_000).contains(&input.loc_added)
+        || !(0..=1_000_000).contains(&input.loc_deleted)
+        || !(0..=100_000).contains(&input.files_changed)
+        || !(-1_000_000..=1_000_000).contains(&input.tests_delta)
+    {
+        return Err(ApiError::bad_request(
+            "locAdded, locDeleted, filesChanged, and testsDelta are out of bounds",
+        ));
+    }
+
+    if !(0..=10_000).contains(&input.prompt_turn_count)
+        || !(0..=10_000).contains(&input.red_ci_pushes)
+        || !(0..=10_000).contains(&input.ccr_rounds)
+        || !(0..=10_000).contains(&input.ccr_actionable_count)
+        || !(0..=10_000).contains(&input.ccr_noise_count)
+        || !(0..=10_000).contains(&input.human_threads_count)
+    {
+        return Err(ApiError::bad_request(
+            "turn, CI, CCR, and review thread counts must be between 0 and 10000",
+        ));
+    }
+
+    const MAX_CODING_DURATION_SEC: i32 = 604_800; // 7 days in seconds
+    if !(0..=MAX_CODING_DURATION_SEC).contains(&input.time_to_green_sec)
+        || !(0..=MAX_CODING_DURATION_SEC).contains(&input.time_to_merge_sec)
+    {
+        return Err(ApiError::bad_request(format!(
+            "timeToGreenSec and timeToMergeSec must be between 0 and {MAX_CODING_DURATION_SEC}"
+        )));
+    }
+
+    input.digest_summary = input.digest_summary.trim().to_string();
+    if input.digest_summary.len() > 4096 {
+        return Err(ApiError::bad_request(
+            "digestSummary must be at most 4096 characters",
+        ));
+    }
+
+    Ok(classify_size_bucket(input.loc_added, input.loc_deleted).to_string())
+}
+
+/// Records or updates a single-model coding run idempotently on `(user_id, run_key)`.
+///
+/// Stale replays (`client_sent_at < existing.client_sent_at`) return the existing record without
+/// overwriting newer metrics, and human overrides (`human_override`, `override_note`) are preserved
+/// across re-submissions.
+pub async fn record_coding_run(
+    pool: &PgPool,
+    user_id: Uuid,
+    mut input: CodingRunInput,
+) -> Result<RecordedCodingRunOutput, ApiError> {
+    let size_bucket = validate_and_normalize_coding_run_input(&mut input)?;
+
+    let mut tx = pool.begin().await.map_err(|err| {
+        tracing::error!(?err, "failed to begin record_coding_run transaction");
+        ApiError::internal("database error")
+    })?;
+
+    lock_user_row(&mut tx, user_id).await?;
+
+    if input.lineage.is_empty() {
+        let roster: Vec<RosterEntry> = sqlx::query_as(
+            "SELECT skill, lineage, champion_model, backup_model, sort_order, enabled, updated_at
+             FROM arena_roster
+             WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "failed to query roster for coding run lineage");
+            ApiError::internal("failed to record coding run")
+        })?;
+        input.lineage = infer_lineage(&input.model, &roster);
+    }
+
+    let upserted: Option<(i64, String)> = sqlx::query_as(
+        "INSERT INTO arena_coding_runs (
+            user_id, run_key, model, lineage, harness, repo, pr_number, issue_ref,
+            task_kind, loc_added, loc_deleted, size_bucket, files_changed, tests_delta,
+            prompt_turn_count, red_ci_pushes, ccr_rounds, ccr_actionable_count, ccr_noise_count,
+            human_threads_count, escaped_regression, merged_without_followup_24h, first_pass_clean,
+            abandoned, time_to_green_sec, time_to_merge_sec, digest_summary,
+            occurred_at, client_sent_at, recorded_at
+         ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19,
+            $20, $21, $22, $23,
+            $24, $25, $26, $27,
+            COALESCE($28, NOW()), COALESCE($29, NOW()), NOW()
+         )
+         ON CONFLICT (user_id, run_key) DO UPDATE SET
+            model = EXCLUDED.model,
+            lineage = EXCLUDED.lineage,
+            harness = EXCLUDED.harness,
+            repo = EXCLUDED.repo,
+            pr_number = EXCLUDED.pr_number,
+            issue_ref = EXCLUDED.issue_ref,
+            task_kind = EXCLUDED.task_kind,
+            loc_added = EXCLUDED.loc_added,
+            loc_deleted = EXCLUDED.loc_deleted,
+            size_bucket = EXCLUDED.size_bucket,
+            files_changed = EXCLUDED.files_changed,
+            tests_delta = EXCLUDED.tests_delta,
+            prompt_turn_count = EXCLUDED.prompt_turn_count,
+            red_ci_pushes = EXCLUDED.red_ci_pushes,
+            ccr_rounds = EXCLUDED.ccr_rounds,
+            ccr_actionable_count = EXCLUDED.ccr_actionable_count,
+            ccr_noise_count = EXCLUDED.ccr_noise_count,
+            human_threads_count = EXCLUDED.human_threads_count,
+            escaped_regression = EXCLUDED.escaped_regression,
+            merged_without_followup_24h = EXCLUDED.merged_without_followup_24h,
+            first_pass_clean = EXCLUDED.first_pass_clean,
+            abandoned = EXCLUDED.abandoned,
+            time_to_green_sec = EXCLUDED.time_to_green_sec,
+            time_to_merge_sec = EXCLUDED.time_to_merge_sec,
+            digest_summary = EXCLUDED.digest_summary,
+            occurred_at = COALESCE($28, arena_coding_runs.occurred_at),
+            client_sent_at = COALESCE($29, NOW()),
+            recorded_at = NOW()
+         WHERE arena_coding_runs.client_sent_at IS NULL
+            OR $29 IS NULL
+            OR $29 >= arena_coding_runs.client_sent_at
+         RETURNING id, size_bucket",
+    )
+    .bind(user_id)
+    .bind(&input.run_key)
+    .bind(&input.model)
+    .bind(&input.lineage)
+    .bind(&input.harness)
+    .bind(&input.repo)
+    .bind(input.pr_number)
+    .bind(&input.issue_ref)
+    .bind(&input.task_kind)
+    .bind(input.loc_added)
+    .bind(input.loc_deleted)
+    .bind(&size_bucket)
+    .bind(input.files_changed)
+    .bind(input.tests_delta)
+    .bind(input.prompt_turn_count)
+    .bind(input.red_ci_pushes)
+    .bind(input.ccr_rounds)
+    .bind(input.ccr_actionable_count)
+    .bind(input.ccr_noise_count)
+    .bind(input.human_threads_count)
+    .bind(input.escaped_regression)
+    .bind(input.merged_without_followup_24h)
+    .bind(input.first_pass_clean)
+    .bind(input.abandoned)
+    .bind(input.time_to_green_sec)
+    .bind(input.time_to_merge_sec)
+    .bind(&input.digest_summary)
+    .bind(input.occurred_at)
+    .bind(input.client_sent_at)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to upsert coding run");
+        ApiError::internal("failed to record coding run")
+    })?;
+
+    let (run_id, stored_bucket) =
+        match upserted {
+            Some(pair) => pair,
+            None => {
+                let existing: (i64, String) = sqlx::query_as(
+                "SELECT id, size_bucket FROM arena_coding_runs WHERE user_id = $1 AND run_key = $2",
+            )
+            .bind(user_id)
+            .bind(&input.run_key)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|err| {
+                tracing::error!(?err, "failed to fetch existing coding run after stale replay");
+                ApiError::internal("failed to record coding run")
+            })?;
+                tx.commit().await.map_err(|err| {
+                    tracing::error!(?err, "failed to commit stale coding run replay");
+                    ApiError::internal("failed to record coding run")
+                })?;
+                return Ok(RecordedCodingRunOutput {
+                    run_id: existing.0,
+                    run_key: input.run_key,
+                    size_bucket: existing.1,
+                    spooled: false,
+                });
+            }
+        };
+
+    tx.commit().await.map_err(|err| {
+        tracing::error!(?err, "failed to commit record_coding_run");
+        ApiError::internal("failed to record coding run")
+    })?;
+
+    Ok(RecordedCodingRunOutput {
+        run_id,
+        run_key: input.run_key,
+        size_bucket: stored_bucket,
+        spooled: false,
+    })
+}
+
+pub async fn override_coding_run(
+    pool: &PgPool,
+    user_id: Uuid,
+    coding_run_id: i64,
+    input: OverrideCodingRunInput,
+) -> Result<OverrideCodingRunResponse, ApiError> {
+    if coding_run_id <= 0 {
+        return Err(ApiError::bad_request("coding run id must be positive"));
+    }
+
+    let raw_override = input.human_override.trim().to_ascii_lowercase();
+    let stored = match raw_override.as_str() {
+        "confirmed" => "confirmed",
+        "overturned" => "overturned",
+        "clear" | "" => "",
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "invalid humanOverride {other:?}: must be confirmed, overturned, or clear"
+            )));
+        }
+    };
+
+    let note = if stored.is_empty() && input.note.trim().is_empty() {
+        ""
+    } else {
+        input.note.trim()
+    };
+    if note.len() > 2000 {
+        return Err(ApiError::bad_request(
+            "note must be at most 2000 characters",
+        ));
+    }
+
+    let mut tx = pool.begin().await.map_err(|err| {
+        tracing::error!(?err, "failed to begin override_coding_run transaction");
+        ApiError::internal("database error")
+    })?;
+
+    lock_user_row(&mut tx, user_id).await?;
+
+    let updated = sqlx::query(
+        "UPDATE arena_coding_runs
+         SET human_override = $3,
+             override_note = $4
+         WHERE id = $1 AND user_id = $2",
+    )
+    .bind(coding_run_id)
+    .bind(user_id)
+    .bind(stored)
+    .bind(note)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| {
+        tracing::error!(?err, "failed to override coding run");
+        ApiError::internal("failed to override coding run")
+    })?;
+
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::not_found(format!(
+            "coding run {coding_run_id} not found"
+        )));
+    }
+
+    tx.commit().await.map_err(|err| {
+        tracing::error!(?err, "failed to commit override_coding_run");
+        ApiError::internal("failed to override coding run")
+    })?;
+
+    Ok(OverrideCodingRunResponse {
+        id: coding_run_id,
         human_override: stored.to_string(),
     })
 }

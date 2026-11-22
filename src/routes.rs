@@ -16,11 +16,13 @@ use utoipa_axum::routes;
 use uuid::Uuid;
 
 use crate::arena::{
-    DecideTrialInput, Leaderboard, LeaderboardQuery, OverrideCandidateInput,
-    OverrideCandidateResponse, PanelSelection, RecordRunInput, RecordedRunOutput,
-    ReplaceRosterRequest, RosterListResponse, SelectPanelInput, StartTrialInput, Trial,
-    TrialsListResponse, decide_trial, get_leaderboard, list_roster, list_trials,
-    override_candidate, record_run, replace_roster, select_panel, start_trial,
+    CodingLeaderboard, CodingLeaderboardQuery, CodingRunInput, DecideTrialInput, Leaderboard,
+    LeaderboardQuery, OverrideCandidateInput, OverrideCandidateResponse, OverrideCodingRunInput,
+    OverrideCodingRunResponse, PanelSelection, RecordRunInput, RecordedCodingRunOutput,
+    RecordedRunOutput, ReplaceRosterRequest, RosterListResponse, SelectPanelInput, StartTrialInput,
+    Trial, TrialsListResponse, decide_trial, get_coding_leaderboard, get_leaderboard, list_roster,
+    list_trials, override_candidate, override_coding_run, record_coding_run, record_run,
+    replace_roster, select_panel, start_trial,
 };
 use crate::auth::{
     ApiToken, AuthenticatedUser, CreatedApiToken, SESSION_COOKIE_NAME, SessionUser, User,
@@ -203,6 +205,9 @@ pub fn build_openapi_router() -> OpenApiRouter<AppState> {
         .routes(routes!(record_run_handler))
         .routes(routes!(override_candidate_handler))
         .routes(routes!(get_leaderboard_handler))
+        .routes(routes!(record_coding_run_handler))
+        .routes(routes!(override_coding_run_handler))
+        .routes(routes!(get_coding_leaderboard_handler))
 }
 
 pub fn openapi_spec() -> utoipa::openapi::OpenApi {
@@ -852,5 +857,82 @@ async fn get_leaderboard_handler(
     Query(query): Query<LeaderboardQuery>,
 ) -> Result<Json<Leaderboard>, ApiError> {
     let lb = get_leaderboard(&state.pool, user.id, query).await?;
+    Ok(Json(lb))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/coding-runs",
+    tag = "arena",
+    request_body = CodingRunInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Recorded single-model coding run idempotently by runKey", body = RecordedCodingRunOutput),
+        (status = 400, description = "Invalid coding run payload", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn record_coding_run_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(payload): Json<CodingRunInput>,
+) -> Result<Json<RecordedCodingRunOutput>, ApiError> {
+    let out = record_coding_run(&state.pool, user.id, payload).await?;
+    Ok(Json(out))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/coding-runs/{id}/override",
+    tag = "arena",
+    params(
+        ("id" = i64, Path, description = "Coding run ID")
+    ),
+    request_body = OverrideCodingRunInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Updated coding run override", body = OverrideCodingRunResponse),
+        (status = 400, description = "Invalid humanOverride value", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 404, description = "Coding run not found", body = ErrorBody)
+    )
+)]
+async fn override_coding_run_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(id): Path<i64>,
+    Json(payload): Json<OverrideCodingRunInput>,
+) -> Result<Json<OverrideCodingRunResponse>, ApiError> {
+    let out = override_coding_run(&state.pool, user.id, id, payload).await?;
+    Ok(Json(out))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/coding-leaderboard",
+    tag = "arena",
+    params(CodingLeaderboardQuery),
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Multi-axis coding model profiles and diff-size / task-kind slice cells", body = CodingLeaderboard),
+        (status = 400, description = "Invalid filter parameters", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn get_coding_leaderboard_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Query(query): Query<CodingLeaderboardQuery>,
+) -> Result<Json<CodingLeaderboard>, ApiError> {
+    let lb = get_coding_leaderboard(&state.pool, user.id, query).await?;
     Ok(Json(lb))
 }

@@ -499,10 +499,102 @@ pub struct CodingRunRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RecordedCodingRunOutput {
+    pub run_id: i64,
+    pub run_key: String,
+    pub size_bucket: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spooled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct OverrideCodingRunInput {
+    /// Override value: `confirmed` (marks the PR outcome clean and clears `escapedRegression`),
+    /// `overturned` (marks the PR outcome as having an escaped regression), or `clear` (resets to recorded metrics).
     pub human_override: String,
     #[serde(default)]
     pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OverrideCodingRunResponse {
+    pub id: i64,
+    pub human_override: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, IntoParams, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodingLeaderboardQuery {
+    /// Lookback window in days (1..=3650, defaults to 90)
+    pub days: Option<i32>,
+    /// Optional owner/repo filter
+    pub repo: Option<String>,
+    /// Optional task kind filter: feature, bugfix, refactor, cleanup, other
+    pub task_kind: Option<String>,
+    /// Optional diff size bucket filter: S (<50 LOC), M (50..=250 LOC), L (>250 LOC)
+    pub size_bucket: Option<String>,
+    /// Optional RFC3339 lower bound timestamp (overrides days)
+    pub from: Option<DateTime<Utc>>,
+    /// Optional RFC3339 upper bound timestamp
+    pub to: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodingModelProfile {
+    pub model: String,
+    pub lineage: String,
+    pub total_runs: i32,
+    pub merged_runs: i32,
+    pub abandoned_runs: i32,
+    pub zero_touch_runs: i32,
+    pub zero_touch_rate: f64,
+    pub first_pass_clean_runs: i32,
+    pub first_pass_clean_rate: f64,
+    pub merged_clean_24h_runs: i32,
+    pub merged_clean_24h_rate: f64,
+    pub escaped_regressions: i32,
+    pub escaped_regression_rate: f64,
+    pub avg_prompt_turns: f64,
+    pub avg_red_ci_pushes: f64,
+    pub avg_ccr_rounds: f64,
+    pub total_ccr_actionable: i32,
+    pub total_ccr_noise: i32,
+    pub ccr_noise_ratio: f64,
+    pub total_human_threads: i32,
+    pub avg_human_threads: f64,
+    pub avg_loc_churn: i32,
+    pub avg_tests_delta: f64,
+    pub p50_time_to_green_sec: i32,
+    pub p90_time_to_green_sec: i32,
+    pub p50_time_to_merge_sec: i32,
+    pub p90_time_to_merge_sec: i32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodingSliceCell {
+    pub model: String,
+    pub size_bucket: String,
+    pub task_kind: String,
+    pub runs: i32,
+    pub zero_touch_rate: f64,
+    pub first_pass_clean_rate: f64,
+    pub escaped_regression_rate: f64,
+    pub avg_ccr_rounds: f64,
+    pub p50_time_to_merge_sec: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodingLeaderboard {
+    pub window_days: i32,
+    pub total_runs: i32,
+    pub models: Vec<CodingModelProfile>,
+    pub slices: Vec<CodingSliceCell>,
+    pub recent_runs: Vec<CodingRunRecord>,
 }
 
 pub fn is_valid_skill(skill: &str) -> bool {
