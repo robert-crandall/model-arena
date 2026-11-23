@@ -2483,7 +2483,8 @@ async fn arena_reasoning_effort_trials_and_leaderboards_flow() {
     assert_eq!(comparison["champion"]["p50DurationMs"], 20_000);
     assert_eq!(comparison["challenger"]["p50DurationMs"], 35_000);
 
-    // 7b. Failed primary at xhigh + retried fallback at high for same model is accepted
+    // 7b. Failed primary at xhigh + retried fallback at high for same model is accepted,
+    // and adopted findings credit the successful fallback effort only.
     let fallback_rec = client
         .post(format!("{base_url}/api/runs"))
         .json(&json!({
@@ -2495,12 +2496,65 @@ async fn arena_reasoning_effort_trials_and_leaderboards_flow() {
             "legs": [
                 { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "xhigh", "status": "timeout" },
                 { "slotIndex": 1, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "high", "status": "retried", "durationMs": 22_000 }
+            ],
+            "candidates": [
+                {
+                    "summary": "Fallback catch",
+                    "severity": "important",
+                    "disposition": "adopted",
+                    "proposingModels": ["gpt-6.2-sol"]
+                }
             ]
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(fallback_rec.status(), StatusCode::OK);
+
+    let lb_after_fb: Value = client
+        .get(format!("{base_url}/api/leaderboard?days=30"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let high_after_fb = lb_after_fb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.2-sol" && m["reasoningEffort"] == "high")
+        .expect("high scorecard after fallback");
+    let xhigh_after_fb = lb_after_fb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.2-sol" && m["reasoningEffort"] == "xhigh")
+        .expect("xhigh scorecard after fallback");
+    assert_eq!(high_after_fb["soloCatches"], 2);
+    assert_eq!(xhigh_after_fb["soloCatches"], 1);
+    assert_eq!(xhigh_after_fb["failuresCount"], 1);
+
+    // 7d. Changing only championReasoningEffort during an open trial returns 409 Conflict
+    let effort_conflict = client
+        .put(format!("{base_url}/api/roster/adversarial-review"))
+        .json(&json!({
+            "slots": [
+                {
+                    "lineage": "openai",
+                    "championModel": "gpt-6.2-sol",
+                    "championReasoningEffort": "medium",
+                    "backupModel": "gpt-6.1-sol",
+                    "backupReasoningEffort": "medium",
+                    "sortOrder": 0,
+                    "enabled": true
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(effort_conflict.status(), StatusCode::CONFLICT);
 
     // 7c. Plan-tournament lens matrix splits same model across reasoning efforts
     for (run_key, effort, won, picks) in [

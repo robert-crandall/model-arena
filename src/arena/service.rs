@@ -1052,7 +1052,11 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
                         "candidate {idx} proposer {trimmed:?} requires a ponytail leg in legs"
                     )));
                 }
-            } else if !reviewer_models.contains_key(&lower) {
+            } else if !input
+                .legs
+                .iter()
+                .any(|leg| leg.role == "reviewer" && leg.model.eq_ignore_ascii_case(trimmed))
+            {
                 return Err(ApiError::bad_request(format!(
                     "candidate {idx} proposer {trimmed:?} does not match any reviewer leg in legs"
                 )));

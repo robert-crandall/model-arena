@@ -1548,13 +1548,24 @@ mod tests {
 
         let lines = [
             r#"{"type":"session.start","timestamp":"2026-03-02T10:00:00Z","data":{"startTime":"2026-03-02T10:00:00Z","selectedModel":"claude-opus-5.5","reasoningEffort":"high"}}"#,
-            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:00:02Z","data":{"source":"user","newModel":"gemini-4-neon","reasoningEffort":null}}"#,
+            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:00:01Z","data":{"source":"user","reasoningEffort":"xhigh"}}"#,
+            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:00:02Z","data":{"source":"user"}}"#,
+            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:00:03Z","data":{"source":"user","reasoningEffort":null}}"#,
+            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:00:04Z","data":{"source":"user","newModel":"gemini-4-neon","reasoningEffort":null}}"#,
             r#"{"type":"skill.invoked","timestamp":"2026-03-02T10:00:05Z","data":{"name":"adversarial-review"}}"#,
             r#"{"type":"tool.execution_start","timestamp":"2026-03-02T10:00:10Z","data":{"toolCallId":"t1","toolName":"task","arguments":{"name":"rev-a","agent_type":"rubber-duck","model":"gpt-6.2-sol","reasoning_effort":"xhigh","description":"Adversarial review"}}}"#,
             r#"{"type":"tool.execution_complete","timestamp":"2026-03-02T10:00:40Z","data":{"toolCallId":"t1","success":true}}"#,
             r#"{"type":"tool.execution_start","timestamp":"2026-03-02T10:00:10Z","data":{"toolCallId":"t2","toolName":"task","arguments":{"name":"rev-b","agent_type":"rubber-duck","model":"claude-opus-5.5","reasoningEffort":"turbo","description":"Adversarial review"}}}"#,
             r#"{"type":"tool.execution_complete","timestamp":"2026-03-02T10:00:50Z","data":{"toolCallId":"t2","success":true}}"#,
             r#"{"type":"assistant.message","timestamp":"2026-03-02T10:01:00Z","data":{"content":"Adversarial review for owner/repo#99\nApproach: keep\nFindings:\n- gpt-6.2-sol caught race condition\nSet aside:\n- claude-opus-5.5 style nit"}}"#,
+            r#"{"type":"user.message","timestamp":"2026-03-02T10:02:00Z","data":{"content":"Second review"}}"#,
+            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:02:01Z","data":{"source":"user","reasoningEffort":"medium"}}"#,
+            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:02:02Z","data":{"source":"user"}}"#,
+            r#"{"type":"tool.execution_start","timestamp":"2026-03-02T10:02:05Z","data":{"toolCallId":"t3","toolName":"task","arguments":{"name":"rev-c","agent_type":"rubber-duck","model":"gpt-6.2-sol","reasoning_effort":"high","description":"Adversarial review"}}}"#,
+            r#"{"type":"tool.execution_start","timestamp":"2026-03-02T10:02:06Z","data":{"toolCallId":"t4","toolName":"task","arguments":{"name":"rev-d","agent_type":"rubber-duck","model":"claude-opus-5.5","reasoning_effort":"high","description":"Adversarial review"}}}"#,
+            r#"{"type":"tool.execution_complete","timestamp":"2026-03-02T10:02:25Z","data":{"toolCallId":"t3","success":true}}"#,
+            r#"{"type":"tool.execution_complete","timestamp":"2026-03-02T10:02:26Z","data":{"toolCallId":"t4","success":true}}"#,
+            r#"{"type":"assistant.message","timestamp":"2026-03-02T10:02:30Z","data":{"content":"Adversarial review for owner/repo#100\nApproach: keep\nFindings: none\nSet aside: none"}}"#,
         ];
         for line in lines {
             writeln!(f, "{line}").unwrap();
@@ -1562,7 +1573,7 @@ mod tests {
         drop(f);
 
         let runs = parse_session_events_file(&events_path, "sess-effort", "macbook");
-        assert_eq!(runs.len(), 1);
+        assert_eq!(runs.len(), 2);
         let r = &runs[0];
         assert_eq!(r.host_model, "gemini-4-neon");
         assert_eq!(r.host_reasoning_effort, "");
@@ -1571,5 +1582,9 @@ mod tests {
         assert_eq!(r.legs[0].reasoning_effort, "xhigh");
         assert_eq!(r.legs[1].model, "claude-opus-5.5");
         assert_eq!(r.legs[1].reasoning_effort, "");
+
+        let r2 = &runs[1];
+        assert_eq!(r2.host_model, "gemini-4-neon");
+        assert_eq!(r2.host_reasoning_effort, "medium");
     }
 }
