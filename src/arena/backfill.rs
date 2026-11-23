@@ -308,6 +308,7 @@ pub fn parse_session_events_file(
                 }
             }
             "session.model_change" => {
+                let has_reasoning_effort = ev.data.get("reasoningEffort").is_some();
                 if let Ok(d) = serde_json::from_value::<ModelChangeData>(ev.data)
                     && d.source != "agent"
                 {
@@ -315,7 +316,7 @@ pub fn parse_session_events_file(
                         host_model = d.new_model.trim().to_string();
                         host_reasoning_effort =
                             normalize_effort_lossy(d.reasoning_effort.as_deref());
-                    } else if d.reasoning_effort.is_some() {
+                    } else if has_reasoning_effort {
                         host_reasoning_effort =
                             normalize_effort_lossy(d.reasoning_effort.as_deref());
                     }

@@ -998,7 +998,7 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
     let mut has_ponytail_leg = false;
     for leg in &input.legs {
         match leg.role.as_str() {
-            "reviewer" => {
+            "reviewer" if matches!(leg.status.as_str(), "ok" | "retried") => {
                 let lower = leg.model.to_ascii_lowercase();
                 if let Some(prev_effort) = reviewer_models.get(&lower)
                     && prev_effort != &leg.reasoning_effort

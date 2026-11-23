@@ -14,6 +14,3 @@ ALTER TABLE arena_run_legs
 
 ALTER TABLE arena_coding_runs
   ADD COLUMN IF NOT EXISTS reasoning_effort TEXT NOT NULL DEFAULT '';
-
-CREATE INDEX IF NOT EXISTS idx_arena_run_legs_model_effort_role
-  ON arena_run_legs (model, reasoning_effort, role);

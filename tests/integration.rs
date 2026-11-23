@@ -2473,6 +2473,98 @@ async fn arena_reasoning_effort_trials_and_leaderboards_flow() {
     assert_eq!(high_sc["p50DurationMs"], 20_000);
     assert_eq!(xhigh_sc["p50DurationMs"], 35_000);
 
+    // Trial comparison splits champion (high) vs challenger (xhigh) separately
+    let comparison = &lb["trials"][0];
+    assert_eq!(comparison["trial"]["id"], trial_id);
+    assert_eq!(comparison["champion"]["reasoningEffort"], "high");
+    assert_eq!(comparison["challenger"]["reasoningEffort"], "xhigh");
+    assert_eq!(comparison["champion"]["soloCatches"], 1);
+    assert_eq!(comparison["challenger"]["soloCatches"], 1);
+    assert_eq!(comparison["champion"]["p50DurationMs"], 20_000);
+    assert_eq!(comparison["challenger"]["p50DurationMs"], 35_000);
+
+    // 7b. Failed primary at xhigh + retried fallback at high for same model is accepted
+    let fallback_rec = client
+        .post(format!("{base_url}/api/runs"))
+        .json(&json!({
+            "runKey": "ar_eff_fallback",
+            "skill": "adversarial-review",
+            "artifactKind": "pr_diff",
+            "hostModel": "gemini-4-neon",
+            "approachVerdict": "keep",
+            "legs": [
+                { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "xhigh", "status": "timeout" },
+                { "slotIndex": 1, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "high", "status": "retried", "durationMs": 22_000 }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fallback_rec.status(), StatusCode::OK);
+
+    // 7c. Plan-tournament lens matrix splits same model across reasoning efforts
+    for (run_key, effort, won, picks) in [
+        ("pt_eff_high", "high", false, 1),
+        ("pt_eff_xhigh", "xhigh", true, 0),
+    ] {
+        let rec = client
+            .post(format!("{base_url}/api/runs"))
+            .json(&json!({
+                "runKey": run_key,
+                "skill": "plan-tournament",
+                "artifactKind": "plan",
+                "hostModel": "gemini-4-neon",
+                "winningRole": if won { "edge_cases" } else { "minimal_diff" },
+                "legs": [
+                    {
+                        "slotIndex": 0,
+                        "role": "edge_cases",
+                        "lineage": "openai",
+                        "model": "gpt-6.2-sol",
+                        "reasoningEffort": effort,
+                        "status": "ok",
+                        "wonCorePlan": won,
+                        "cherryPicksCount": picks
+                    }
+                ]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), StatusCode::OK);
+    }
+    let pt_lb: Value = client
+        .get(format!(
+            "{base_url}/api/leaderboard?skill=plan-tournament&days=30"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let lens_cells = pt_lb["lensMatrix"].as_array().unwrap();
+    let high_cell = lens_cells
+        .iter()
+        .find(|c| {
+            c["model"] == "gpt-6.2-sol"
+                && c["reasoningEffort"] == "high"
+                && c["lens"] == "edge_cases"
+        })
+        .expect("high lens cell");
+    let xhigh_cell = lens_cells
+        .iter()
+        .find(|c| {
+            c["model"] == "gpt-6.2-sol"
+                && c["reasoningEffort"] == "xhigh"
+                && c["lens"] == "edge_cases"
+        })
+        .expect("xhigh lens cell");
+    assert_eq!(high_cell["wins"], 0);
+    assert_eq!(high_cell["cherryPicks"], 1);
+    assert_eq!(xhigh_cell["wins"], 1);
+    assert_eq!(xhigh_cell["cherryPicks"], 0);
+
     // 8. Promoting the effort trial rotates (gpt-6.2-sol, high) to backup and promotes (gpt-6.2-sol, xhigh)
     let decide = client
         .post(format!("{base_url}/api/trials/{trial_id}/decide"))
@@ -2530,6 +2622,18 @@ async fn arena_reasoning_effort_trials_and_leaderboards_flow() {
         .await
         .unwrap();
     assert_eq!(coding_lb["models"].as_array().unwrap().len(), 2);
+    let slices = coding_lb["slices"].as_array().unwrap();
+    assert_eq!(slices.len(), 2);
+    assert!(
+        slices
+            .iter()
+            .any(|s| s["model"] == "claude-opus-5.5" && s["reasoningEffort"] == "medium")
+    );
+    assert!(
+        slices
+            .iter()
+            .any(|s| s["model"] == "claude-opus-5.5" && s["reasoningEffort"] == "high")
+    );
 
     tdb.teardown().await;
 }

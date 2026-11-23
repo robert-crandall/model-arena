@@ -615,14 +615,13 @@ fn aggregate_runs(
                 .get(&r.id)
                 .map(Vec::as_slice)
                 .unwrap_or(legs);
-            let mut full_review_seen_in_run: HashMap<String, (String, String)> = HashMap::new();
+            let mut full_review_seen_in_run: HashSet<String> = HashSet::new();
             for el in full_legs {
                 let l = &el.row;
                 if l.role == "reviewer" && matches!(l.status.as_str(), "ok" | "retried") {
                     let trimmed = l.model.trim();
                     if !trimmed.is_empty() {
-                        let key = model_effort_key(trimmed, &l.reasoning_effort);
-                        full_review_seen_in_run.insert(key.0.clone(), key);
+                        full_review_seen_in_run.insert(trimmed.to_ascii_lowercase());
                     }
                 }
             }
@@ -637,7 +636,7 @@ fn aggregate_runs(
                     if pt.is_empty() || pl == "ponytail" || !seen_p.insert(pl.clone()) {
                         continue;
                     }
-                    if !full_review_seen_in_run.contains_key(&pl) {
+                    if !full_review_seen_in_run.contains(&pl) {
                         continue;
                     }
                     all_panel_proposers.push(pt.to_string());
