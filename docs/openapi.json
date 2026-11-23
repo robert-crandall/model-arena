@@ -1483,16 +1483,19 @@
             "type": "boolean"
           },
           "disposition": {
-            "type": "string"
+            "type": "string",
+            "description": "Triage disposition: adopted, set_aside, or open_question."
           },
           "proposingModels": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Reviewer model IDs (or \"ponytail\") that proposed this finding."
           },
           "severity": {
-            "type": "string"
+            "type": "string",
+            "description": "Finding severity (defaults to important)."
           },
           "summary": {
             "type": "string"
@@ -1781,7 +1784,8 @@
             "type": "string"
           },
           "taskKind": {
-            "type": "string"
+            "type": "string",
+            "description": "Task kind: feature (default), bugfix, refactor, cleanup, or other."
           },
           "testsDelta": {
             "type": "integer",
@@ -2046,7 +2050,8 @@
         ],
         "properties": {
           "decision": {
-            "type": "string"
+            "type": "string",
+            "description": "Decision: promote or retire."
           }
         }
       },
@@ -2378,7 +2383,8 @@
         ],
         "properties": {
           "humanOverride": {
-            "type": "string"
+            "type": "string",
+            "description": "Override value: confirmed, overturned, or clear."
           },
           "note": {
             "type": "string"
@@ -2605,10 +2611,12 @@
         ],
         "properties": {
           "approachVerdict": {
-            "type": "string"
+            "type": "string",
+            "description": "Approach verdict for adversarial-review runs (omit or leave empty for plan-tournament)."
           },
           "artifactKind": {
-            "type": "string"
+            "type": "string",
+            "description": "Artifact kind: pr_diff, plan, patch (local edits), branch_diff, or other (default)."
           },
           "artifactRef": {
             "type": "string"
@@ -2655,7 +2663,8 @@
             "format": "date-time"
           },
           "phase": {
-            "type": "string"
+            "type": "string",
+            "description": "Review phase: independent (default), targeted, or follow_up."
           },
           "queueOnly": {
             "type": "boolean"
@@ -2667,10 +2676,12 @@
             "type": "string"
           },
           "skill": {
-            "type": "string"
+            "type": "string",
+            "description": "Skill being recorded: adversarial-review or plan-tournament."
           },
           "winningRole": {
-            "type": "string"
+            "type": "string",
+            "description": "Winning planner role for plan-tournament runs (omit or leave empty for adversarial-review)."
           }
         }
       },
@@ -2838,7 +2849,8 @@
             "type": "boolean"
           },
           "lineage": {
-            "type": "string"
+            "type": "string",
+            "description": "Model lineage (for example: openai, anthropic, google)."
           },
           "sortOrder": {
             "type": "integer",
@@ -2908,7 +2920,8 @@
         "properties": {
           "cherryPicksCount": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Count of ideas cherry-picked from this planner leg in plan-tournament runs."
           },
           "criticAdoptedCount": {
             "type": "integer",
@@ -2926,23 +2939,28 @@
             "type": "boolean"
           },
           "lineage": {
-            "type": "string"
+            "type": "string",
+            "description": "Model lineage (for example: openai, anthropic, google)."
           },
           "model": {
-            "type": "string"
+            "type": "string",
+            "description": "Executed model ID for this leg."
           },
           "reasoningEffort": {
             "type": "string"
           },
           "role": {
-            "type": "string"
+            "type": "string",
+            "description": "Leg role: reviewer or ponytail for adversarial-review; minimal_diff, clean_architecture, edge_cases, critic, or explore_scout for plan-tournament."
           },
           "slotIndex": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "description": "Zero-based distinct slot index for this leg."
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "Execution status (defaults to ok)."
           },
           "trialId": {
             "type": [
@@ -2952,7 +2970,8 @@
             "format": "int64"
           },
           "wonCorePlan": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "True on the winning planner leg in plan-tournament runs."
           }
         }
       },
@@ -3025,7 +3044,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Artifact kind: pr_diff, plan, patch, branch_diff, or other."
           },
           "hostLineage": {
             "type": [
@@ -3040,7 +3060,8 @@
             ]
           },
           "skill": {
-            "type": "string"
+            "type": "string",
+            "description": "Skill to select a panel for: adversarial-review or plan-tournament."
           }
         }
       },
@@ -3063,10 +3084,12 @@
             "type": "string"
           },
           "lineage": {
-            "type": "string"
+            "type": "string",
+            "description": "Roster lineage (for example: openai, anthropic, google)."
           },
           "skill": {
-            "type": "string"
+            "type": "string",
+            "description": "Skill for the bout: adversarial-review or plan-tournament."
           },
           "swapPercent": {
             "type": [

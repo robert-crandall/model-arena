@@ -10,10 +10,10 @@ use crate::arena::types::{
     RecordedCodingRunOutput, RecordedRunOutput, RosterEntry, RosterSlotInput,
     SKILL_ADVERSARIAL_REVIEW, SKILL_PLAN_TOURNAMENT, SelectPanelInput, StartTrialInput,
     TOURNAMENT_LENSES, Trial, VALID_APPROACH_VERDICTS, VALID_CANDIDATE_DISPOSITIONS,
-    VALID_CANDIDATE_SEVERITIES, VALID_LEG_ROLES, VALID_LEG_STATUSES, VALID_PHASES,
-    VALID_TASK_KINDS, VALID_WINNING_ROLES, classify_size_bucket, derive_candidate_keys,
-    infer_lineage, is_trial_competing_role, is_valid_artifact_kind, is_valid_skill,
-    model_effort_key, normalize_reasoning_effort,
+    VALID_CANDIDATE_SEVERITIES, VALID_HUMAN_OVERRIDES, VALID_LEG_ROLES, VALID_LEG_STATUSES,
+    VALID_PHASES, VALID_TASK_KINDS, VALID_TRIAL_DECISIONS, VALID_WINNING_ROLES,
+    classify_size_bucket, derive_candidate_keys, infer_lineage, is_trial_competing_role,
+    is_valid_artifact_kind, is_valid_skill, model_effort_key, normalize_reasoning_effort,
 };
 use crate::auth::random_hex_secret;
 use crate::routes::ApiError;
@@ -465,7 +465,7 @@ pub async fn decide_trial(
     input: DecideTrialInput,
 ) -> Result<Trial, ApiError> {
     let decision = input.decision.trim();
-    if decision != "promote" && decision != "retire" {
+    if !VALID_TRIAL_DECISIONS.contains(&decision) {
         return Err(ApiError::bad_request("decision must be promote or retire"));
     }
 
@@ -985,6 +985,29 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
             return Err(ApiError::bad_request(
                 "leg counts must be 0..=1000 and durationMs must be 0..=86400000",
             ));
+        }
+    }
+
+    if input.skill == SKILL_PLAN_TOURNAMENT && input.winning_role.is_empty() {
+        let mut winning_roles = input.legs.iter().filter_map(|leg| {
+            if leg.won_core_plan
+                && TOURNAMENT_LENSES.contains(&leg.role.as_str())
+                && matches!(leg.status.as_str(), "ok" | "retried")
+            {
+                Some(leg.role.as_str())
+            } else {
+                None
+            }
+        });
+        if let Some(role) = winning_roles.next()
+            && winning_roles.next().is_none()
+            && !input.legs.iter().any(|leg| {
+                leg.role.as_str() == role
+                    && !leg.won_core_plan
+                    && matches!(leg.status.as_str(), "ok" | "retried")
+            })
+        {
+            input.winning_role = role.to_string();
         }
     }
 
@@ -1537,7 +1560,7 @@ pub async fn override_candidate(
     input: OverrideCandidateInput,
 ) -> Result<OverrideCandidateResponse, ApiError> {
     let val = input.human_override.trim();
-    if !matches!(val, "confirmed" | "overturned" | "clear" | "") {
+    if !val.is_empty() && !VALID_HUMAN_OVERRIDES.contains(&val) {
         return Err(ApiError::bad_request(
             "humanOverride must be confirmed, overturned, or clear",
         ));
@@ -1864,15 +1887,14 @@ pub async fn override_coding_run(
     }
 
     let raw_override = input.human_override.trim().to_ascii_lowercase();
-    let stored = match raw_override.as_str() {
-        "confirmed" => "confirmed",
-        "overturned" => "overturned",
-        "clear" | "" => "",
-        other => {
-            return Err(ApiError::bad_request(format!(
-                "invalid humanOverride {other:?}: must be confirmed, overturned, or clear"
-            )));
-        }
+    let stored = if raw_override.is_empty() || raw_override == "clear" {
+        ""
+    } else if VALID_HUMAN_OVERRIDES.contains(&raw_override.as_str()) {
+        raw_override.as_str()
+    } else {
+        return Err(ApiError::bad_request(format!(
+            "invalid humanOverride {raw_override:?}: must be confirmed, overturned, or clear"
+        )));
     };
 
     let note = if stored.is_empty() && input.note.trim().is_empty() {
@@ -1925,4 +1947,154 @@ pub async fn override_coding_run(
         id: coding_run_id,
         human_override: stored.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arena::types::{CandidateInput, RunLegInput};
+
+    fn planner_leg(slot_index: i32, role: &str, status: &str, won_core_plan: bool) -> RunLegInput {
+        RunLegInput {
+            slot_index,
+            role: role.to_string(),
+            lineage: "openai".to_string(),
+            model: "gpt-6.1-sol".to_string(),
+            reasoning_effort: String::new(),
+            is_challenger: false,
+            trial_id: None,
+            status: status.to_string(),
+            duration_ms: 0,
+            won_core_plan,
+            cherry_picks_count: 0,
+            critic_adopted_count: 0,
+            critic_bloat_dropped_count: 0,
+        }
+    }
+
+    fn base_plan_run(winning_role: &str, legs: Vec<RunLegInput>) -> RecordRunInput {
+        RecordRunInput {
+            run_key: "pt_test_1".to_string(),
+            skill: SKILL_PLAN_TOURNAMENT.to_string(),
+            artifact_kind: "plan".to_string(),
+            artifact_ref: String::new(),
+            repo: String::new(),
+            phase: String::new(),
+            host_model: String::new(),
+            host_reasoning_effort: String::new(),
+            host_lineage: String::new(),
+            harness: String::new(),
+            machine: String::new(),
+            approach_verdict: String::new(),
+            winning_role: winning_role.to_string(),
+            occurred_at: None,
+            client_sent_at: None,
+            queue_only: false,
+            legs,
+            candidates: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn derives_winning_role_from_single_succeeded_planner_leg() {
+        let mut input = base_plan_run(
+            "",
+            vec![
+                planner_leg(0, "minimal_diff", "ok", false),
+                planner_leg(1, "clean_architecture", "timeout", true),
+                planner_leg(2, "edge_cases", "retried", true),
+            ],
+        );
+        validate_and_normalize_record_run_input(&mut input).expect("should validate");
+        assert_eq!(input.winning_role, "edge_cases");
+    }
+
+    #[test]
+    fn does_not_derive_winning_role_when_multiple_succeeded_legs_claim_win() {
+        let mut input = base_plan_run(
+            "",
+            vec![
+                planner_leg(0, "minimal_diff", "ok", true),
+                planner_leg(1, "edge_cases", "ok", true),
+            ],
+        );
+        validate_and_normalize_record_run_input(&mut input).expect("should validate");
+        assert_eq!(input.winning_role, "");
+    }
+
+    #[test]
+    fn does_not_derive_winning_role_when_another_succeeded_leg_shares_role() {
+        let mut input = base_plan_run(
+            "",
+            vec![
+                planner_leg(0, "minimal_diff", "ok", true),
+                planner_leg(1, "minimal_diff", "ok", false),
+            ],
+        );
+        validate_and_normalize_record_run_input(&mut input).expect("should validate");
+        assert_eq!(input.winning_role, "");
+    }
+
+    #[test]
+    fn preserves_explicit_winning_role_and_empty_optional_defaults() {
+        let mut plan = base_plan_run(
+            "minimal_diff",
+            vec![
+                planner_leg(0, "minimal_diff", "", false),
+                planner_leg(1, "edge_cases", "ok", true),
+            ],
+        );
+        validate_and_normalize_record_run_input(&mut plan).expect("should validate");
+        assert_eq!(plan.winning_role, "minimal_diff");
+        assert_eq!(plan.legs[0].status, "ok");
+        assert_eq!(plan.phase, "independent");
+
+        let mut review = RecordRunInput {
+            run_key: "ar_test_1".to_string(),
+            skill: SKILL_ADVERSARIAL_REVIEW.to_string(),
+            artifact_kind: String::new(),
+            artifact_ref: String::new(),
+            repo: String::new(),
+            phase: String::new(),
+            host_model: String::new(),
+            host_reasoning_effort: String::new(),
+            host_lineage: String::new(),
+            harness: String::new(),
+            machine: String::new(),
+            approach_verdict: String::new(),
+            winning_role: String::new(),
+            occurred_at: None,
+            client_sent_at: None,
+            queue_only: false,
+            legs: vec![RunLegInput {
+                slot_index: 0,
+                role: "reviewer".to_string(),
+                lineage: String::new(),
+                model: "gpt-6.1-sol".to_string(),
+                reasoning_effort: String::new(),
+                is_challenger: false,
+                trial_id: None,
+                status: String::new(),
+                duration_ms: 0,
+                won_core_plan: false,
+                cherry_picks_count: 0,
+                critic_adopted_count: 0,
+                critic_bloat_dropped_count: 0,
+            }],
+            candidates: vec![CandidateInput {
+                candidate_key: String::new(),
+                summary: "sample".to_string(),
+                severity: String::new(),
+                disposition: "adopted".to_string(),
+                caused_approach_pivot: false,
+                proposing_models: vec!["gpt-6.1-sol".to_string()],
+            }],
+        };
+        validate_and_normalize_record_run_input(&mut review).expect("should validate");
+        assert_eq!(review.artifact_kind, "other");
+        assert_eq!(review.phase, "independent");
+        assert_eq!(review.approach_verdict, "");
+        assert_eq!(review.legs[0].status, "ok");
+        assert_eq!(review.candidates[0].severity, "important");
+    }
 }

@@ -344,8 +344,11 @@ export interface components {
         CandidateInput: {
             candidateKey?: string;
             causedApproachPivot?: boolean;
+            /** @description Triage disposition: adopted, set_aside, or open_question. */
             disposition: string;
+            /** @description Reviewer model IDs (or "ponytail") that proposed this finding. */
             proposingModels: string[];
+            /** @description Finding severity (defaults to important). */
             severity?: string;
             summary?: string;
         };
@@ -451,6 +454,7 @@ export interface components {
             redCiPushes?: number;
             repo?: string;
             runKey: string;
+            /** @description Task kind: feature (default), bugfix, refactor, cleanup, or other. */
             taskKind?: string;
             /** Format: int32 */
             testsDelta?: number;
@@ -540,6 +544,7 @@ export interface components {
             token: string;
         };
         DecideTrialInput: {
+            /** @description Decision: promote or retire. */
             decision: string;
         };
         ErrorBody: {
@@ -646,6 +651,7 @@ export interface components {
             timedRuns: number;
         };
         OverrideCandidateInput: {
+            /** @description Override value: confirmed, overturned, or clear. */
             humanOverride: string;
             note?: string;
         };
@@ -711,7 +717,9 @@ export interface components {
             winningRole: string;
         };
         RecordRunInput: {
+            /** @description Approach verdict for adversarial-review runs (omit or leave empty for plan-tournament). */
             approachVerdict?: string;
+            /** @description Artifact kind: pr_diff, plan, patch (local edits), branch_diff, or other (default). */
             artifactKind?: string;
             artifactRef?: string;
             candidates?: components["schemas"]["CandidateInput"][];
@@ -725,11 +733,14 @@ export interface components {
             machine?: string;
             /** Format: date-time */
             occurredAt?: string | null;
+            /** @description Review phase: independent (default), targeted, or follow_up. */
             phase?: string;
             queueOnly?: boolean;
             repo?: string;
             runKey: string;
+            /** @description Skill being recorded: adversarial-review or plan-tournament. */
             skill: string;
+            /** @description Winning planner role for plan-tournament runs (omit or leave empty for adversarial-review). */
             winningRole?: string;
         };
         RecordedCodingRunOutput: {
@@ -776,6 +787,7 @@ export interface components {
             championModel: string;
             championReasoningEffort?: string;
             enabled?: boolean;
+            /** @description Model lineage (for example: openai, anthropic, google). */
             lineage: string;
             /** Format: int32 */
             sortOrder?: number;
@@ -795,7 +807,10 @@ export interface components {
             summary: string;
         };
         RunLegInput: {
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Count of ideas cherry-picked from this planner leg in plan-tournament runs.
+             */
             cherryPicksCount?: number;
             /** Format: int32 */
             criticAdoptedCount?: number;
@@ -804,15 +819,23 @@ export interface components {
             /** Format: int32 */
             durationMs?: number;
             isChallenger?: boolean;
+            /** @description Model lineage (for example: openai, anthropic, google). */
             lineage?: string;
+            /** @description Executed model ID for this leg. */
             model: string;
             reasoningEffort?: string;
+            /** @description Leg role: reviewer or ponytail for adversarial-review; minimal_diff, clean_architecture, edge_cases, critic, or explore_scout for plan-tournament. */
             role: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Zero-based distinct slot index for this leg.
+             */
             slotIndex: number;
+            /** @description Execution status (defaults to ok). */
             status?: string;
             /** Format: int64 */
             trialId?: number | null;
+            /** @description True on the winning planner leg in plan-tournament runs. */
             wonCorePlan?: boolean;
         };
         RunLegView: {
@@ -835,16 +858,20 @@ export interface components {
             wonCorePlan: boolean;
         };
         SelectPanelInput: {
+            /** @description Artifact kind: pr_diff, plan, patch, branch_diff, or other. */
             artifactKind?: string | null;
             hostLineage?: string | null;
             hostModel?: string | null;
+            /** @description Skill to select a panel for: adversarial-review or plan-tournament. */
             skill: string;
         };
         StartTrialInput: {
             allowPrDiff?: boolean;
             challengerModel: string;
             challengerReasoningEffort?: string;
+            /** @description Roster lineage (for example: openai, anthropic, google). */
             lineage: string;
+            /** @description Skill for the bout: adversarial-review or plan-tournament. */
             skill: string;
             /** Format: int32 */
             swapPercent?: number | null;
