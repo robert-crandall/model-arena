@@ -2535,6 +2535,34 @@ async fn arena_reasoning_effort_trials_and_leaderboards_flow() {
     assert_eq!(xhigh_after_fb["soloCatches"], 1);
     assert_eq!(xhigh_after_fb["failuresCount"], 1);
 
+    // Host-judge affinity matrix splits cells by both host and reviewer reasoningEffort
+    let bias_cells = lb_after_fb["hostBiasMatrix"].as_array().unwrap();
+    assert_eq!(bias_cells.len(), 3);
+    assert!(bias_cells.iter().any(|c| {
+        c["hostModel"] == "gemini-4-neon"
+            && c["hostReasoningEffort"] == "high"
+            && c["reviewerModel"] == "gpt-6.2-sol"
+            && c["reviewerReasoningEffort"] == "high"
+            && c["candidatesEvaluated"] == 1
+            && c["adoptedCount"] == 1
+    }));
+    assert!(bias_cells.iter().any(|c| {
+        c["hostModel"] == "gemini-4-neon"
+            && c["hostReasoningEffort"] == "high"
+            && c["reviewerModel"] == "gpt-6.2-sol"
+            && c["reviewerReasoningEffort"] == "xhigh"
+            && c["candidatesEvaluated"] == 1
+            && c["adoptedCount"] == 1
+    }));
+    assert!(bias_cells.iter().any(|c| {
+        c["hostModel"] == "gemini-4-neon"
+            && c["hostReasoningEffort"] == ""
+            && c["reviewerModel"] == "gpt-6.2-sol"
+            && c["reviewerReasoningEffort"] == "high"
+            && c["candidatesEvaluated"] == 1
+            && c["adoptedCount"] == 1
+    }));
+
     // 7d. Changing only championReasoningEffort during an open trial returns 409 Conflict
     let effort_conflict = client
         .put(format!("{base_url}/api/roster/adversarial-review"))

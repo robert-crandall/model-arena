@@ -36,6 +36,20 @@ pub const VALID_REASONING_EFFORTS: [&str; 7] =
 pub const VALID_TRIAL_DECISIONS: [&str; 2] = ["promote", "retire"];
 pub const VALID_HUMAN_OVERRIDES: [&str; 3] = ["confirmed", "overturned", "clear"];
 
+/// OpenAPI schema type matching `VALID_REASONING_EFFORTS` for utoipa `ToSchema` input fields.
+struct ReasoningEffortSchema;
+
+impl utoipa::PartialSchema for ReasoningEffortSchema {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .schema_type(utoipa::openapi::schema::Type::String)
+            .enum_values(Some(VALID_REASONING_EFFORTS))
+            .into()
+    }
+}
+
+impl utoipa::ToSchema for ReasoningEffortSchema {}
+
 /// Attaches a JSON Schema `enum` constraint derived from a single-source `VALID_*` constant.
 /// Appends `null` automatically for nullable (`Option<String>`) fields and reconciles `default`
 /// so empty-string serde defaults are never advertised outside the enum.
@@ -113,11 +127,13 @@ pub struct RosterSlotInput {
     pub lineage: String,
     pub champion_model: String,
     #[serde(default)]
+    #[schema(inline, value_type = ReasoningEffortSchema)]
     #[schemars(transform = StringEnum::new(&VALID_REASONING_EFFORTS))]
     pub champion_reasoning_effort: String,
     #[serde(default)]
     pub backup_model: String,
     #[serde(default)]
+    #[schema(inline, value_type = ReasoningEffortSchema)]
     #[schemars(transform = StringEnum::new(&VALID_REASONING_EFFORTS))]
     pub backup_reasoning_effort: String,
     #[serde(default)]
@@ -180,6 +196,7 @@ pub struct StartTrialInput {
     pub lineage: String,
     pub challenger_model: String,
     #[serde(default)]
+    #[schema(inline, value_type = ReasoningEffortSchema)]
     #[schemars(transform = StringEnum::new(&VALID_REASONING_EFFORTS))]
     pub challenger_reasoning_effort: String,
     pub target_runs: i32,
@@ -259,6 +276,7 @@ pub struct RunLegInput {
     /// Executed model ID for this leg.
     pub model: String,
     #[serde(default)]
+    #[schema(inline, value_type = ReasoningEffortSchema)]
     #[schemars(transform = StringEnum::new(&VALID_REASONING_EFFORTS))]
     pub reasoning_effort: String,
     #[serde(default)]
@@ -326,6 +344,7 @@ pub struct RecordRunInput {
     #[serde(default)]
     pub host_model: String,
     #[serde(default)]
+    #[schema(inline, value_type = ReasoningEffortSchema)]
     #[schemars(transform = StringEnum::new(&VALID_REASONING_EFFORTS))]
     pub host_reasoning_effort: String,
     #[serde(default)]
@@ -455,8 +474,12 @@ pub struct LensCell {
 #[serde(rename_all = "camelCase")]
 pub struct HostBiasCell {
     pub host_model: String,
+    #[serde(default)]
+    pub host_reasoning_effort: String,
     pub host_lineage: String,
     pub reviewer_model: String,
+    #[serde(default)]
+    pub reviewer_reasoning_effort: String,
     pub reviewer_lineage: String,
     pub candidates_evaluated: i32,
     pub adopted_count: i32,
@@ -548,6 +571,7 @@ pub struct CodingRunInput {
     pub run_key: String,
     pub model: String,
     #[serde(default)]
+    #[schema(inline, value_type = ReasoningEffortSchema)]
     #[schemars(transform = StringEnum::new(&VALID_REASONING_EFFORTS))]
     pub reasoning_effort: String,
     #[serde(default)]
@@ -970,5 +994,19 @@ mod tests {
             },
         ];
         assert!(derive_candidate_keys(&dup).is_err());
+    }
+
+    #[test]
+    fn reasoning_effort_openapi_schema_matches_valid_values() {
+        let schema =
+            serde_json::to_value(<ReasoningEffortSchema as utoipa::PartialSchema>::schema())
+                .expect("serialize schema");
+        let enum_vals: Vec<&str> = schema["enum"]
+            .as_array()
+            .expect("enum array")
+            .iter()
+            .map(|v| v.as_str().expect("string enum value"))
+            .collect();
+        assert_eq!(enum_vals, VALID_REASONING_EFFORTS);
     }
 }

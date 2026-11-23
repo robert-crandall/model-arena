@@ -1771,7 +1771,16 @@
             "type": "boolean"
           },
           "reasoningEffort": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
           },
           "redCiPushes": {
             "type": "integer",
@@ -2107,10 +2116,16 @@
           "hostModel": {
             "type": "string"
           },
+          "hostReasoningEffort": {
+            "type": "string"
+          },
           "reviewerLineage": {
             "type": "string"
           },
           "reviewerModel": {
+            "type": "string"
+          },
+          "reviewerReasoningEffort": {
             "type": "string"
           }
         }
@@ -2644,7 +2659,16 @@
             "type": "string"
           },
           "hostReasoningEffort": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
           },
           "legs": {
             "type": "array",
@@ -2837,13 +2861,31 @@
             "type": "string"
           },
           "backupReasoningEffort": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
           },
           "championModel": {
             "type": "string"
           },
           "championReasoningEffort": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
           },
           "enabled": {
             "type": "boolean"
@@ -2947,7 +2989,16 @@
             "description": "Executed model ID for this leg."
           },
           "reasoningEffort": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
           },
           "role": {
             "type": "string",
@@ -3081,7 +3132,16 @@
             "type": "string"
           },
           "challengerReasoningEffort": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
           },
           "lineage": {
             "type": "string",

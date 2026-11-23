@@ -788,7 +788,7 @@ export function AppShell(props: { user: User }) {
                     <table class="arena-table">
                       <thead>
                         <tr>
-                          <th>Host Lineage</th>
+                          <th>Host</th>
                           <th>Reviewer Model</th>
                           <th>Evaluated</th>
                           <th>Adopted</th>
@@ -799,9 +799,24 @@ export function AppShell(props: { user: User }) {
                         <For each={leaderboard()?.hostBiasMatrix ?? []}>
                           {(cell) => (
                             <tr>
-                              <td>{cell.hostLineage}</td>
                               <td>
-                                <code>{cell.reviewerModel}</code>
+                                <code>
+                                  {formatModelLabel(
+                                    cell.hostModel,
+                                    cell.hostReasoningEffort,
+                                  )}
+                                </code>{" "}
+                                <span class="field-hint">
+                                  ({cell.hostLineage})
+                                </span>
+                              </td>
+                              <td>
+                                <code>
+                                  {formatModelLabel(
+                                    cell.reviewerModel,
+                                    cell.reviewerReasoningEffort,
+                                  )}
+                                </code>
                               </td>
                               <td>{cell.candidatesEvaluated}</td>
                               <td>{cell.adoptedCount}</td>

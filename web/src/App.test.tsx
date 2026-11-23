@@ -638,8 +638,10 @@ describe("Model Arena SPA foundation", () => {
         {
           hostLineage: "gemini",
           hostModel: "gemini-3.1-pro",
+          hostReasoningEffort: "medium",
           reviewerLineage: "claude",
           reviewerModel: "claude-opus-4.7",
+          reviewerReasoningEffort: "high",
           candidatesEvaluated: 6,
           adoptedCount: 5,
           adoptionRate: 0.8333,
@@ -792,6 +794,14 @@ describe("Model Arena SPA foundation", () => {
     expect(host.textContent).toContain(
       "Challenger leads quality (+0.220 score)",
     );
+
+    const historyTab = tabs.find((btn) =>
+      btn.textContent?.includes("Matrices & History"),
+    )!;
+    historyTab.click();
+    flush();
+    expect(host.textContent).toContain("gemini-3.1-pro (medium)");
+    expect(host.textContent).toContain("claude-opus-4.7 (high)");
 
     // Ensure there are no buttons to promote or retire trials in the UI
     const allButtons = Array.from(host.querySelectorAll("button")).map((b) =>

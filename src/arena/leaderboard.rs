@@ -465,7 +465,7 @@ fn aggregate_runs(
 
     let mut model_map: HashMap<(String, String), ModelAccum> = HashMap::new();
     let mut lens_map: HashMap<((String, String), String), LensCell> = HashMap::new();
-    let mut bias_map: HashMap<(String, String), HostBiasCell> = HashMap::new();
+    let mut bias_map = HashMap::new();
 
     let get_model = |model_map: &mut HashMap<(String, String), ModelAccum>,
                      model_lineage: &mut HashMap<String, String>,
@@ -681,6 +681,7 @@ fn aggregate_runs(
 
                     if !r.host_model.is_empty() && matches!(eff, "adopted" | "set_aside") {
                         let reviewer_model = acc.sc.model.clone();
+                        let reviewer_effort = acc.sc.reasoning_effort.clone();
                         let reviewer_lineage = acc.sc.lineage.clone();
                         let host_lin = if !r.host_lineage.is_empty() {
                             r.host_lineage.clone()
@@ -688,13 +689,15 @@ fn aggregate_runs(
                             infer_lineage(&r.host_model, roster)
                         };
                         let bkey = (
-                            r.host_model.to_ascii_lowercase(),
-                            reviewer_model.to_ascii_lowercase(),
+                            model_effort_key(&r.host_model, &r.host_reasoning_effort),
+                            model_effort_key(&reviewer_model, &reviewer_effort),
                         );
                         let bc = bias_map.entry(bkey).or_insert_with(|| HostBiasCell {
                             host_model: r.host_model.clone(),
+                            host_reasoning_effort: r.host_reasoning_effort.clone(),
                             host_lineage: host_lin,
                             reviewer_model,
+                            reviewer_reasoning_effort: reviewer_effort,
                             reviewer_lineage,
                             ..Default::default()
                         });
@@ -811,7 +814,12 @@ fn aggregate_runs(
     bias_cells.sort_by(|a, b| {
         a.host_model
             .cmp(&b.host_model)
+            .then_with(|| a.host_reasoning_effort.cmp(&b.host_reasoning_effort))
             .then_with(|| a.reviewer_model.cmp(&b.reviewer_model))
+            .then_with(|| {
+                a.reviewer_reasoning_effort
+                    .cmp(&b.reviewer_reasoning_effort)
+            })
     });
 
     (models, lens_cells, bias_cells)

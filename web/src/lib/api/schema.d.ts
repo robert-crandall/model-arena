@@ -449,7 +449,8 @@ export interface components {
             /** Format: int32 */
             promptTurnCount?: number;
             queueOnly?: boolean;
-            reasoningEffort?: string;
+            /** @enum {string} */
+            reasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             /** Format: int32 */
             redCiPushes?: number;
             repo?: string;
@@ -562,8 +563,10 @@ export interface components {
             candidatesEvaluated: number;
             hostLineage: string;
             hostModel: string;
+            hostReasoningEffort?: string;
             reviewerLineage: string;
             reviewerModel: string;
+            reviewerReasoningEffort?: string;
         };
         Leaderboard: {
             hostBiasMatrix: components["schemas"]["HostBiasCell"][];
@@ -728,7 +731,8 @@ export interface components {
             harness?: string;
             hostLineage?: string;
             hostModel?: string;
-            hostReasoningEffort?: string;
+            /** @enum {string} */
+            hostReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             legs: components["schemas"]["RunLegInput"][];
             machine?: string;
             /** Format: date-time */
@@ -783,9 +787,11 @@ export interface components {
         };
         RosterSlotInput: {
             backupModel?: string;
-            backupReasoningEffort?: string;
+            /** @enum {string} */
+            backupReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             championModel: string;
-            championReasoningEffort?: string;
+            /** @enum {string} */
+            championReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             enabled?: boolean;
             /** @description Model lineage (for example: openai, anthropic, google). */
             lineage: string;
@@ -823,7 +829,8 @@ export interface components {
             lineage?: string;
             /** @description Executed model ID for this leg. */
             model: string;
-            reasoningEffort?: string;
+            /** @enum {string} */
+            reasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             /** @description Leg role: reviewer or ponytail for adversarial-review; minimal_diff, clean_architecture, edge_cases, critic, or explore_scout for plan-tournament. */
             role: string;
             /**
@@ -868,7 +875,8 @@ export interface components {
         StartTrialInput: {
             allowPrDiff?: boolean;
             challengerModel: string;
-            challengerReasoningEffort?: string;
+            /** @enum {string} */
+            challengerReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             /** @description Roster lineage (for example: openai, anthropic, google). */
             lineage: string;
             /** @description Skill for the bout: adversarial-review or plan-tournament. */
