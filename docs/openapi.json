@@ -2585,7 +2585,7 @@
         "properties": {
           "approachVerdict": {
             "type": "string",
-            "description": "Approach verdict for adversarial-review runs (omit for plan-tournament)."
+            "description": "Approach verdict for adversarial-review runs (omit or leave empty for plan-tournament)."
           },
           "artifactKind": {
             "type": "string",
@@ -2651,7 +2651,7 @@
           },
           "winningRole": {
             "type": "string",
-            "description": "Winning planner role for plan-tournament runs (omit for adversarial-review)."
+            "description": "Winning planner role for plan-tournament runs (omit or leave empty for adversarial-review)."
           }
         }
       },

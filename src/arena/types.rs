@@ -14,11 +14,8 @@ pub const TOURNAMENT_LENSES: [&str; 3] = ["minimal_diff", "clean_architecture", 
 
 pub const VALID_ARTIFACT_KINDS: [&str; 5] = ["pr_diff", "plan", "patch", "branch_diff", "other"];
 pub const VALID_PHASES: [&str; 3] = ["independent", "targeted", "follow_up"];
-pub const VALID_APPROACH_VERDICT_VALUES: [&str; 4] =
-    ["keep", "adjust", "rethink", "insufficient_evidence"];
 pub const VALID_APPROACH_VERDICTS: [&str; 5] =
     ["", "keep", "adjust", "rethink", "insufficient_evidence"];
-pub const VALID_WINNING_ROLE_VALUES: [&str; 3] = TOURNAMENT_LENSES;
 pub const VALID_WINNING_ROLES: [&str; 4] = ["", "minimal_diff", "clean_architecture", "edge_cases"];
 pub const VALID_LEG_ROLES: [&str; 7] = [
     "reviewer",
@@ -82,7 +79,9 @@ impl schemars::transform::Transform for StringEnum {
                 "default".into(),
                 serde_json::Value::String(default.to_string()),
             );
-        } else if schema.get("default").and_then(|v| v.as_str()) == Some("") {
+        } else if !self.values.contains(&"")
+            && schema.get("default").and_then(|v| v.as_str()) == Some("")
+        {
             schema.remove("default");
         }
     }
@@ -306,13 +305,13 @@ pub struct RecordRunInput {
     pub harness: String,
     #[serde(default)]
     pub machine: String,
-    /// Approach verdict for adversarial-review runs (omit for plan-tournament).
+    /// Approach verdict for adversarial-review runs (omit or leave empty for plan-tournament).
     #[serde(default)]
-    #[schemars(transform = StringEnum::new(&VALID_APPROACH_VERDICT_VALUES))]
+    #[schemars(transform = StringEnum::new(&VALID_APPROACH_VERDICTS))]
     pub approach_verdict: String,
-    /// Winning planner role for plan-tournament runs (omit for adversarial-review).
+    /// Winning planner role for plan-tournament runs (omit or leave empty for adversarial-review).
     #[serde(default)]
-    #[schemars(transform = StringEnum::new(&VALID_WINNING_ROLE_VALUES))]
+    #[schemars(transform = StringEnum::new(&VALID_WINNING_ROLES))]
     pub winning_role: String,
     #[serde(default)]
     #[schemars(with = "Option<String>")]

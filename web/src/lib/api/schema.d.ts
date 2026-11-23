@@ -708,7 +708,7 @@ export interface components {
             winningRole: string;
         };
         RecordRunInput: {
-            /** @description Approach verdict for adversarial-review runs (omit for plan-tournament). */
+            /** @description Approach verdict for adversarial-review runs (omit or leave empty for plan-tournament). */
             approachVerdict?: string;
             /** @description Artifact kind: pr_diff, plan, patch (local edits), branch_diff, or other (default). */
             artifactKind?: string;
@@ -730,7 +730,7 @@ export interface components {
             runKey: string;
             /** @description Skill being recorded: adversarial-review or plan-tournament. */
             skill: string;
-            /** @description Winning planner role for plan-tournament runs (omit for adversarial-review). */
+            /** @description Winning planner role for plan-tournament runs (omit or leave empty for adversarial-review). */
             winningRole?: string;
         };
         RecordedCodingRunOutput: {

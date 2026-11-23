@@ -932,6 +932,11 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
         });
         if let Some(role) = winning_roles.next()
             && winning_roles.next().is_none()
+            && !input.legs.iter().any(|leg| {
+                leg.role.as_str() == role
+                    && !leg.won_core_plan
+                    && matches!(leg.status.as_str(), "ok" | "retried")
+            })
         {
             input.winning_role = role.to_string();
         }
@@ -1899,6 +1904,19 @@ mod tests {
             vec![
                 planner_leg(0, "minimal_diff", "ok", true),
                 planner_leg(1, "edge_cases", "ok", true),
+            ],
+        );
+        validate_and_normalize_record_run_input(&mut input).expect("should validate");
+        assert_eq!(input.winning_role, "");
+    }
+
+    #[test]
+    fn does_not_derive_winning_role_when_another_succeeded_leg_shares_role() {
+        let mut input = base_plan_run(
+            "",
+            vec![
+                planner_leg(0, "minimal_diff", "ok", true),
+                planner_leg(1, "minimal_diff", "ok", false),
             ],
         );
         validate_and_normalize_record_run_input(&mut input).expect("should validate");

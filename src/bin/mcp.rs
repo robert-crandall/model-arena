@@ -801,18 +801,30 @@ mod tests {
         assert_eq!(
             schema.pointer("/properties/approachVerdict/enum"),
             Some(&json!([
+                "",
                 "keep",
                 "adjust",
                 "rethink",
                 "insufficient_evidence"
             ]))
         );
-        assert_eq!(schema.pointer("/properties/approachVerdict/default"), None);
+        assert_eq!(
+            schema.pointer("/properties/approachVerdict/default"),
+            Some(&json!(""))
+        );
         assert_eq!(
             schema.pointer("/properties/winningRole/enum"),
-            Some(&json!(["minimal_diff", "clean_architecture", "edge_cases"]))
+            Some(&json!([
+                "",
+                "minimal_diff",
+                "clean_architecture",
+                "edge_cases"
+            ]))
         );
-        assert_eq!(schema.pointer("/properties/winningRole/default"), None);
+        assert_eq!(
+            schema.pointer("/properties/winningRole/default"),
+            Some(&json!(""))
+        );
 
         assert_eq!(
             schema.pointer("/properties/legs/items/properties/role/enum"),
@@ -901,6 +913,12 @@ mod tests {
                 .pointer("/properties/slots/items/properties/championModel")
                 .is_some(),
             "set_roster slots items should be inlined"
+        );
+
+        let start_trial = tool_schema("start_trial");
+        assert_eq!(
+            start_trial.pointer("/properties/skill/enum"),
+            Some(&json!(["adversarial-review", "plan-tournament"]))
         );
 
         let decide_trial = tool_schema("decide_trial");
