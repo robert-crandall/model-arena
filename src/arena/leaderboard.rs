@@ -10,7 +10,7 @@ use crate::arena::types::{
     CodingSliceCell, HostBiasCell, Leaderboard, LeaderboardQuery, LensCell, ModelScorecard,
     RecentRunView, RosterEntry, RunCandidateView, RunLegView, SKILL_ADVERSARIAL_REVIEW,
     SKILL_PLAN_TOURNAMENT, TOURNAMENT_LENSES, Trial, TrialComparison, VALID_SIZE_BUCKETS,
-    VALID_TASK_KINDS, infer_lineage, is_trial_competing_role, is_valid_skill,
+    VALID_TASK_KINDS, infer_lineage, is_trial_competing_role, is_valid_skill, model_effort_key,
 };
 use crate::routes::ApiError;
 
@@ -23,6 +23,7 @@ struct RunRow {
     artifact_ref: String,
     repo: String,
     host_model: String,
+    host_reasoning_effort: String,
     host_lineage: String,
     harness: String,
     machine: String,
@@ -38,6 +39,7 @@ struct LegRow {
     role: String,
     lineage: String,
     model: String,
+    reasoning_effort: String,
     is_challenger: bool,
     trial_id: Option<i64>,
     status: String,
@@ -120,7 +122,7 @@ pub async fn get_leaderboard(
 
     let all_runs = sqlx::query_as::<_, RunRow>(
         "SELECT id, run_key, skill, artifact_kind, artifact_ref, repo,
-                host_model, host_lineage, harness, machine,
+                host_model, host_reasoning_effort, host_lineage, harness, machine,
                 approach_verdict, winning_role, occurred_at
          FROM arena_runs
          WHERE user_id = $1
@@ -146,7 +148,7 @@ pub async fn get_leaderboard(
 
     if !run_ids.is_empty() {
         let raw_legs = sqlx::query_as::<_, LegRow>(
-            "SELECT run_id, slot_index, role, lineage, model, is_challenger, trial_id,
+            "SELECT run_id, slot_index, role, lineage, model, reasoning_effort, is_challenger, trial_id,
                     status, duration_ms, won_core_plan, cherry_picks_count,
                     critic_adopted_count, critic_bloat_dropped_count
              FROM arena_run_legs
@@ -243,6 +245,7 @@ pub async fn get_leaderboard(
                             role: el.row.role.clone(),
                             lineage: el.row.lineage.clone(),
                             model: el.row.model.clone(),
+                            reasoning_effort: el.row.reasoning_effort.clone(),
                             is_challenger: el.row.is_challenger,
                             status: el.row.status.clone(),
                             duration_ms: el.row.duration_ms,
@@ -283,6 +286,7 @@ pub async fn get_leaderboard(
                 artifact_ref: r.artifact_ref.clone(),
                 repo: r.repo.clone(),
                 host_model: r.host_model.clone(),
+                host_reasoning_effort: r.host_reasoning_effort.clone(),
                 harness: r.harness.clone(),
                 machine: r.machine.clone(),
                 approach_verdict: r.approach_verdict.clone(),
@@ -331,12 +335,22 @@ pub async fn get_leaderboard(
                 .iter()
                 .filter(|el| {
                     let l = &el.row;
+                    let leg_key = model_effort_key(&l.model, &l.reasoning_effort);
                     l.trial_id == Some(t.id)
                         && l.lineage == t.lineage
                         && is_trial_competing_role(&t.skill, &l.role)
-                        && ((l.is_challenger && l.model.eq_ignore_ascii_case(&t.challenger_model))
+                        && ((l.is_challenger
+                            && leg_key
+                                == model_effort_key(
+                                    &t.challenger_model,
+                                    &t.challenger_reasoning_effort,
+                                ))
                             || (!l.is_challenger
-                                && l.model.eq_ignore_ascii_case(&t.champion_model)))
+                                && leg_key
+                                    == model_effort_key(
+                                        &t.champion_model,
+                                        &t.champion_reasoning_effort,
+                                    )))
                 })
                 .cloned()
                 .collect();
@@ -358,18 +372,23 @@ pub async fn get_leaderboard(
 
         let mut champ_card = ModelScorecard {
             model: t.champion_model.clone(),
+            reasoning_effort: t.champion_reasoning_effort.clone(),
             lineage: t.lineage.clone(),
             ..Default::default()
         };
         let mut chall_card = ModelScorecard {
             model: t.challenger_model.clone(),
+            reasoning_effort: t.challenger_reasoning_effort.clone(),
             lineage: t.lineage.clone(),
             ..Default::default()
         };
+        let champ_key = model_effort_key(&t.champion_model, &t.champion_reasoning_effort);
+        let chall_key = model_effort_key(&t.challenger_model, &t.challenger_reasoning_effort);
         for m in t_models {
-            if m.model.eq_ignore_ascii_case(&t.champion_model) {
+            let m_key = model_effort_key(&m.model, &m.reasoning_effort);
+            if m_key == champ_key {
                 champ_card = m;
-            } else if m.model.eq_ignore_ascii_case(&t.challenger_model) {
+            } else if m_key == chall_key {
                 chall_card = m;
             }
         }
@@ -418,52 +437,62 @@ fn aggregate_runs(
     roster: &[RosterEntry],
     trials: &[Trial],
 ) -> (Vec<ModelScorecard>, Vec<LensCell>, Vec<HostBiasCell>) {
-    let mut champion_set: HashSet<String> = HashSet::new();
+    let mut champion_set: HashSet<(String, String)> = HashSet::new();
     let mut model_lineage: HashMap<String, String> = HashMap::new();
     for r in roster {
-        let champ_key = r.champion_model.to_ascii_lowercase();
+        let champ_model_lower = r.champion_model.to_ascii_lowercase();
         if r.enabled {
-            champion_set.insert(champ_key.clone());
+            champion_set.insert(model_effort_key(
+                &r.champion_model,
+                &r.champion_reasoning_effort,
+            ));
         }
-        model_lineage.insert(champ_key, r.lineage.clone());
+        model_lineage.insert(champ_model_lower, r.lineage.clone());
         if !r.backup_model.is_empty() {
             model_lineage.insert(r.backup_model.to_ascii_lowercase(), r.lineage.clone());
         }
     }
 
-    let mut active_challenger: HashMap<String, i64> = HashMap::new();
+    let mut active_challenger: HashMap<(String, String), i64> = HashMap::new();
     for t in trials {
         if matches!(t.status.as_str(), "active" | "completed") {
-            active_challenger.insert(t.challenger_model.to_ascii_lowercase(), t.id);
+            active_challenger.insert(
+                model_effort_key(&t.challenger_model, &t.challenger_reasoning_effort),
+                t.id,
+            );
         }
     }
 
-    let mut model_map: HashMap<String, ModelAccum> = HashMap::new();
-    let mut lens_map: HashMap<(String, String), LensCell> = HashMap::new();
-    let mut bias_map: HashMap<(String, String), HostBiasCell> = HashMap::new();
+    let mut model_map: HashMap<(String, String), ModelAccum> = HashMap::new();
+    let mut lens_map: HashMap<((String, String), String), LensCell> = HashMap::new();
+    let mut bias_map = HashMap::new();
 
-    let get_model = |model_map: &mut HashMap<String, ModelAccum>,
+    let get_model = |model_map: &mut HashMap<(String, String), ModelAccum>,
                      model_lineage: &mut HashMap<String, String>,
                      model_name: &str,
+                     reasoning_effort: &str,
                      lineage_hint: &str|
-     -> Option<String> {
+     -> Option<(String, String)> {
         let trimmed = model_name.trim();
         if trimmed.is_empty() {
             return None;
         }
-        let key = trimmed.to_ascii_lowercase();
+        let key = model_effort_key(trimmed, reasoning_effort);
+        let model_lower = key.0.clone();
+        let effort = key.1.clone();
         let acc = model_map.entry(key.clone()).or_insert_with(|| {
             let lin = if !lineage_hint.is_empty() {
                 lineage_hint.to_string()
             } else {
                 model_lineage
-                    .get(&key)
+                    .get(&model_lower)
                     .cloned()
                     .unwrap_or_else(|| infer_lineage(trimmed, roster))
             };
             ModelAccum {
                 sc: ModelScorecard {
                     model: trimmed.to_string(),
+                    reasoning_effort: effort,
                     lineage: lin,
                     is_current_champion: champion_set.contains(&key),
                     active_challenger_trial_id: active_challenger.get(&key).copied(),
@@ -476,7 +505,7 @@ fn aggregate_runs(
             acc.sc.lineage = lineage_hint.to_string();
         }
         if !acc.sc.lineage.is_empty() {
-            model_lineage.insert(key.clone(), acc.sc.lineage.clone());
+            model_lineage.insert(model_lower, acc.sc.lineage.clone());
         }
         Some(key)
     };
@@ -486,22 +515,28 @@ fn aggregate_runs(
             &mut model_map,
             &mut model_lineage,
             &r.champion_model,
+            &r.champion_reasoning_effort,
             &r.lineage,
         );
     }
 
     for r in runs {
         let legs = legs_by_run.get(&r.id).map(Vec::as_slice).unwrap_or(&[]);
-        let mut review_seen_in_run: HashSet<String> = HashSet::new();
-        let mut timed_reviewer_in_run: HashSet<String> = HashSet::new();
+        let mut review_seen_in_run: HashMap<String, (String, String)> = HashMap::new();
+        let mut timed_reviewer_in_run: HashSet<(String, String)> = HashSet::new();
 
         for el in legs {
             let l = &el.row;
             if matches!(l.role.as_str(), "ponytail" | "explore_scout") {
                 continue;
             }
-            let Some(key) = get_model(&mut model_map, &mut model_lineage, &l.model, &l.lineage)
-            else {
+            let Some(key) = get_model(
+                &mut model_map,
+                &mut model_lineage,
+                &l.model,
+                &l.reasoning_effort,
+                &l.lineage,
+            ) else {
                 continue;
             };
             let acc = model_map.get_mut(&key).expect("model initialized");
@@ -530,7 +565,11 @@ fn aggregate_runs(
             }
 
             if r.skill == SKILL_ADVERSARIAL_REVIEW && l.role == "reviewer" {
-                if review_seen_in_run.insert(key.clone()) {
+                let model_lower = key.0.clone();
+                if review_seen_in_run
+                    .insert(model_lower, key.clone())
+                    .is_none()
+                {
                     acc.sc.review_runs += 1;
                 }
                 if l.duration_ms > 0 {
@@ -548,9 +587,10 @@ fn aggregate_runs(
                         acc.sc.cherry_picks += l.cherry_picks_count;
 
                         let cell = lens_map
-                            .entry((acc.sc.model.to_ascii_lowercase(), l.role.clone()))
+                            .entry((key.clone(), l.role.clone()))
                             .or_insert_with(|| LensCell {
                                 model: acc.sc.model.clone(),
+                                reasoning_effort: acc.sc.reasoning_effort.clone(),
                                 lens: l.role.clone(),
                                 ..Default::default()
                             });
@@ -610,13 +650,12 @@ fn aggregate_runs(
 
                 for pm in &all_panel_proposers {
                     let pl = pm.to_ascii_lowercase();
-                    if !review_seen_in_run.contains(&pl) {
-                        continue;
-                    }
-                    let Some(key) = get_model(&mut model_map, &mut model_lineage, pm, "") else {
+                    let Some(key) = review_seen_in_run.get(&pl).cloned() else {
                         continue;
                     };
-                    let acc = model_map.get_mut(&key).expect("model initialized");
+                    let Some(acc) = model_map.get_mut(&key) else {
+                        continue;
+                    };
                     match eff {
                         "adopted" => {
                             if is_solo {
@@ -642,6 +681,7 @@ fn aggregate_runs(
 
                     if !r.host_model.is_empty() && matches!(eff, "adopted" | "set_aside") {
                         let reviewer_model = acc.sc.model.clone();
+                        let reviewer_effort = acc.sc.reasoning_effort.clone();
                         let reviewer_lineage = acc.sc.lineage.clone();
                         let host_lin = if !r.host_lineage.is_empty() {
                             r.host_lineage.clone()
@@ -649,13 +689,15 @@ fn aggregate_runs(
                             infer_lineage(&r.host_model, roster)
                         };
                         let bkey = (
-                            r.host_model.to_ascii_lowercase(),
-                            reviewer_model.to_ascii_lowercase(),
+                            model_effort_key(&r.host_model, &r.host_reasoning_effort),
+                            model_effort_key(&reviewer_model, &reviewer_effort),
                         );
                         let bc = bias_map.entry(bkey).or_insert_with(|| HostBiasCell {
                             host_model: r.host_model.clone(),
+                            host_reasoning_effort: r.host_reasoning_effort.clone(),
                             host_lineage: host_lin,
                             reviewer_model,
+                            reviewer_reasoning_effort: reviewer_effort,
                             reviewer_lineage,
                             ..Default::default()
                         });
@@ -678,12 +720,20 @@ fn aggregate_runs(
             cell
         })
         .collect();
-    lens_cells.sort_by(|a, b| a.model.cmp(&b.model).then_with(|| a.lens.cmp(&b.lens)));
+    lens_cells.sort_by(|a, b| {
+        a.model
+            .cmp(&b.model)
+            .then_with(|| a.reasoning_effort.cmp(&b.reasoning_effort))
+            .then_with(|| a.lens.cmp(&b.lens))
+    });
 
-    let mut model_lens_lookup: HashMap<(String, String), LensCell> = HashMap::new();
+    let mut model_lens_lookup: HashMap<((String, String), String), LensCell> = HashMap::new();
     for cell in &lens_cells {
         model_lens_lookup.insert(
-            (cell.model.to_ascii_lowercase(), cell.lens.clone()),
+            (
+                model_effort_key(&cell.model, &cell.reasoning_effort),
+                cell.lens.clone(),
+            ),
             cell.clone(),
         );
     }
@@ -748,6 +798,7 @@ fn aggregate_runs(
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .then_with(|| a.model.cmp(&b.model))
+            .then_with(|| a.reasoning_effort.cmp(&b.reasoning_effort))
     });
 
     let mut bias_cells: Vec<HostBiasCell> = bias_map
@@ -763,7 +814,12 @@ fn aggregate_runs(
     bias_cells.sort_by(|a, b| {
         a.host_model
             .cmp(&b.host_model)
+            .then_with(|| a.host_reasoning_effort.cmp(&b.host_reasoning_effort))
             .then_with(|| a.reviewer_model.cmp(&b.reviewer_model))
+            .then_with(|| {
+                a.reviewer_reasoning_effort
+                    .cmp(&b.reviewer_reasoning_effort)
+            })
     });
 
     (models, lens_cells, bias_cells)
@@ -1094,7 +1150,7 @@ pub async fn get_coding_leaderboard(
     let roster = list_roster(pool, user_id, None).await?;
 
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT id, run_key, model, lineage, harness, repo, pr_number, issue_ref,
+        "SELECT id, run_key, model, reasoning_effort, lineage, harness, repo, pr_number, issue_ref,
                 task_kind, loc_added, loc_deleted, size_bucket, files_changed, tests_delta,
                 prompt_turn_count, red_ci_pushes, ccr_rounds, ccr_actionable_count, ccr_noise_count,
                 human_threads_count, escaped_regression, merged_without_followup_24h, first_pass_clean,
@@ -1130,6 +1186,7 @@ pub async fn get_coding_leaderboard(
 
     #[derive(Default)]
     struct ModelAccum {
+        display_model: String,
         lineage: String,
         total_runs: i32,
         merged_runs: i32,
@@ -1152,6 +1209,7 @@ pub async fn get_coding_leaderboard(
 
     #[derive(Default)]
     struct SliceAccum {
+        display_model: String,
         runs: i32,
         zero_touch_runs: i32,
         first_pass_clean_runs: i32,
@@ -1160,15 +1218,19 @@ pub async fn get_coding_leaderboard(
         merge_secs: Vec<i32>,
     }
 
-    let mut by_model: HashMap<String, ModelAccum> = HashMap::new();
-    let mut by_slice: HashMap<(String, String, String), SliceAccum> = HashMap::new();
+    let mut by_model: HashMap<(String, String), ModelAccum> = HashMap::new();
+    let mut by_slice: HashMap<((String, String), String, String), SliceAccum> = HashMap::new();
 
     for r in &runs {
         let (eff_escaped, eff_first_pass_clean, eff_merged_clean_24h) =
             effective_coding_outcomes(r);
         let is_zero_touch = !r.abandoned && !eff_escaped && r.prompt_turn_count <= 1;
 
-        let m = by_model.entry(r.model.clone()).or_default();
+        let mk = model_effort_key(&r.model, &r.reasoning_effort);
+        let m = by_model.entry(mk.clone()).or_default();
+        if m.display_model.is_empty() {
+            m.display_model = r.model.clone();
+        }
         if m.lineage.is_empty() {
             m.lineage = if r.lineage.is_empty() {
                 infer_lineage(&r.model, &roster)
@@ -1210,8 +1272,11 @@ pub async fn get_coding_leaderboard(
         }
 
         let s = by_slice
-            .entry((r.model.clone(), r.size_bucket.clone(), r.task_kind.clone()))
+            .entry((mk, r.size_bucket.clone(), r.task_kind.clone()))
             .or_default();
+        if s.display_model.is_empty() {
+            s.display_model = r.model.clone();
+        }
         s.runs += 1;
         if is_zero_touch {
             s.zero_touch_runs += 1;
@@ -1230,7 +1295,7 @@ pub async fn get_coding_leaderboard(
 
     let mut models: Vec<CodingModelProfile> = by_model
         .into_iter()
-        .map(|(model, mut acc)| {
+        .map(|((_, reasoning_effort), mut acc)| {
             acc.green_secs.sort_unstable();
             acc.merge_secs.sort_unstable();
             let n = f64::from(acc.total_runs);
@@ -1242,7 +1307,8 @@ pub async fn get_coding_leaderboard(
             };
 
             CodingModelProfile {
-                model,
+                model: acc.display_model,
+                reasoning_effort,
                 lineage: acc.lineage,
                 total_runs: acc.total_runs,
                 merged_runs: acc.merged_runs,
@@ -1281,30 +1347,35 @@ pub async fn get_coding_leaderboard(
             .then_with(|| b.first_pass_clean_rate.total_cmp(&a.first_pass_clean_rate))
             .then_with(|| b.total_runs.cmp(&a.total_runs))
             .then_with(|| a.model.cmp(&b.model))
+            .then_with(|| a.reasoning_effort.cmp(&b.reasoning_effort))
     });
 
     let mut slices: Vec<CodingSliceCell> = by_slice
         .into_iter()
-        .map(|((model, size_bucket, task_kind), mut acc)| {
-            acc.merge_secs.sort_unstable();
-            let n = f64::from(acc.runs);
-            CodingSliceCell {
-                model,
-                size_bucket,
-                task_kind,
-                runs: acc.runs,
-                zero_touch_rate: round3(f64::from(acc.zero_touch_runs) / n),
-                first_pass_clean_rate: round3(f64::from(acc.first_pass_clean_runs) / n),
-                escaped_regression_rate: round3(f64::from(acc.escaped_regressions) / n),
-                avg_ccr_rounds: round3(acc.total_ccr_rounds as f64 / n),
-                p50_time_to_merge_sec: median_ms(&acc.merge_secs),
-            }
-        })
+        .map(
+            |(((_, reasoning_effort), size_bucket, task_kind), mut acc)| {
+                acc.merge_secs.sort_unstable();
+                let n = f64::from(acc.runs);
+                CodingSliceCell {
+                    model: acc.display_model,
+                    reasoning_effort,
+                    size_bucket,
+                    task_kind,
+                    runs: acc.runs,
+                    zero_touch_rate: round3(f64::from(acc.zero_touch_runs) / n),
+                    first_pass_clean_rate: round3(f64::from(acc.first_pass_clean_runs) / n),
+                    escaped_regression_rate: round3(f64::from(acc.escaped_regressions) / n),
+                    avg_ccr_rounds: round3(acc.total_ccr_rounds as f64 / n),
+                    p50_time_to_merge_sec: median_ms(&acc.merge_secs),
+                }
+            },
+        )
         .collect();
 
     slices.sort_by(|a, b| {
         a.model
             .cmp(&b.model)
+            .then_with(|| a.reasoning_effort.cmp(&b.reasoning_effort))
             .then_with(|| a.size_bucket.cmp(&b.size_bucket))
             .then_with(|| a.task_kind.cmp(&b.task_kind))
     });

@@ -2058,6 +2058,7 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
             repo: "robert-crandall/model-arena-rust".to_string(),
             phase: "independent".to_string(),
             host_model: "gemini-4-argon".to_string(),
+            host_reasoning_effort: String::new(),
             host_lineage: String::new(),
             harness: "copilot-cli".to_string(),
             machine: "test-host".to_string(),
@@ -2071,6 +2072,7 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
                 role: "reviewer".to_string(),
                 lineage: "openai".to_string(),
                 model: "gpt-6.1-sol".to_string(),
+                reasoning_effort: String::new(),
                 is_challenger: false,
                 trial_id: None,
                 status: "ok".to_string(),
@@ -2093,6 +2095,7 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
         CodingRunInput {
             run_key: "spooled_cr_1".to_string(),
             model: "claude-opus-5.5".to_string(),
+            reasoning_effort: "high".to_string(),
             lineage: String::new(),
             harness: "t3-code".to_string(),
             repo: "robert-crandall/model-arena-rust".to_string(),
@@ -2251,6 +2254,468 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
         .expect("gpt-6.1-sol in leaderboard");
     assert_eq!(sol["timedRuns"], 2); // 32s from spooled AR run + 35s from backfilled PT run
     assert_eq!(sol["cherryPicks"], 1);
+
+    tdb.teardown().await;
+}
+
+#[tokio::test]
+async fn arena_reasoning_effort_trials_and_leaderboards_flow() {
+    let Some(tdb) = TestDb::setup().await else {
+        eprintln!("skipping Postgres integration test (TEST_DATABASE_URL not set)");
+        return;
+    };
+    let base_url = spawn_in_process_server(tdb.pool.clone(), true).await;
+
+    let client = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .expect("cookie client");
+
+    let reg = client
+        .post(format!("{base_url}/api/auth/register"))
+        .json(&json!({
+            "email": "effort@example.com",
+            "password": "very-strong-passphrase",
+            "name": "Effort Tester"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg.status(), StatusCode::CREATED);
+
+    // 1. Invalid reasoning effort is rejected with 400
+    let bad_roster = client
+        .put(format!("{base_url}/api/roster/adversarial-review"))
+        .json(&json!({
+            "slots": [
+                { "lineage": "openai", "championModel": "gpt-6.2-sol", "championReasoningEffort": "turbo", "sortOrder": 0, "enabled": true }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_roster.status(), StatusCode::BAD_REQUEST);
+
+    // 2. Valid roster with champion + backup reasoning efforts
+    let put_roster = client
+        .put(format!("{base_url}/api/roster/adversarial-review"))
+        .json(&json!({
+            "slots": [
+                {
+                    "lineage": "openai",
+                    "championModel": "gpt-6.2-sol",
+                    "championReasoningEffort": "high",
+                    "backupModel": "gpt-6.1-sol",
+                    "backupReasoningEffort": "medium",
+                    "sortOrder": 0,
+                    "enabled": true
+                },
+                {
+                    "lineage": "anthropic",
+                    "championModel": "claude-opus-5.5",
+                    "championReasoningEffort": "high",
+                    "backupModel": "claude-sonnet-5",
+                    "backupReasoningEffort": "",
+                    "sortOrder": 1,
+                    "enabled": true
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put_roster.status(), StatusCode::OK);
+
+    // 3. Same-model + same-effort trial must fail with 400
+    let same_tuple = client
+        .post(format!("{base_url}/api/trials"))
+        .json(&json!({
+            "skill": "adversarial-review",
+            "lineage": "openai",
+            "challengerModel": "gpt-6.2-sol",
+            "challengerReasoningEffort": "high",
+            "targetRuns": 2,
+            "swapPercent": 100
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(same_tuple.status(), StatusCode::BAD_REQUEST);
+
+    // 4. Same-model + different-effort trial (high vs xhigh) succeeds
+    let start_trial = client
+        .post(format!("{base_url}/api/trials"))
+        .json(&json!({
+            "skill": "adversarial-review",
+            "lineage": "openai",
+            "challengerModel": "gpt-6.2-sol",
+            "challengerReasoningEffort": "xhigh",
+            "targetRuns": 1,
+            "swapPercent": 100,
+            "allowPrDiff": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start_trial.status(), StatusCode::OK);
+    let trial: Value = start_trial.json().await.unwrap();
+    let trial_id = trial["id"].as_i64().unwrap();
+    assert_eq!(trial["championReasoningEffort"], "high");
+    assert_eq!(trial["challengerReasoningEffort"], "xhigh");
+
+    // 5. select_panel returns challenger effort and backup effort
+    let panel: Value = client
+        .post(format!("{base_url}/api/panel/select"))
+        .json(&json!({
+            "skill": "adversarial-review",
+            "artifactKind": "pr_diff",
+            "hostModel": "gemini-4-neon"
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let openai_leg = panel["legs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["lineage"] == "openai")
+        .expect("openai leg");
+    assert_eq!(openai_leg["model"], "gpt-6.2-sol");
+    assert_eq!(openai_leg["reasoningEffort"], "xhigh");
+    assert_eq!(openai_leg["backupReasoningEffort"], "medium");
+    assert_eq!(openai_leg["isChallenger"], true);
+
+    // 6. Ambiguous same-model conflicting-effort reviewers in one run are rejected with 400
+    let ambiguous = client
+        .post(format!("{base_url}/api/runs"))
+        .json(&json!({
+            "runKey": "ar_ambiguous_effort",
+            "skill": "adversarial-review",
+            "artifactKind": "pr_diff",
+            "hostModel": "gemini-4-neon",
+            "legs": [
+                { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "high", "status": "ok" },
+                { "slotIndex": 1, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "xhigh", "status": "ok" }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ambiguous.status(), StatusCode::BAD_REQUEST);
+
+    // 7. Record one champion (high) run and one challenger (xhigh) run for the same model
+    for (run_key, effort, duration_ms) in [
+        ("ar_eff_champ", "high", 20_000),
+        ("ar_eff_chall", "xhigh", 35_000),
+    ] {
+        let rec = client
+            .post(format!("{base_url}/api/runs"))
+            .json(&json!({
+                "runKey": run_key,
+                "skill": "adversarial-review",
+                "artifactKind": "pr_diff",
+                "hostModel": "gemini-4-neon",
+                "hostReasoningEffort": "high",
+                "approachVerdict": "keep",
+                "legs": [
+                    {
+                        "slotIndex": 0,
+                        "role": "reviewer",
+                        "lineage": "openai",
+                        "model": "gpt-6.2-sol",
+                        "reasoningEffort": effort,
+                        "trialId": trial_id,
+                        "status": "ok",
+                        "durationMs": duration_ms
+                    }
+                ],
+                "candidates": [
+                    {
+                        "summary": format!("Finding from {effort}"),
+                        "severity": "important",
+                        "disposition": "adopted",
+                        "proposingModels": ["gpt-6.2-sol"]
+                    }
+                ]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), StatusCode::OK);
+    }
+
+    // Leaderboard splits (gpt-6.2-sol, high) and (gpt-6.2-sol, xhigh) into separate scorecards
+    let lb: Value = client
+        .get(format!("{base_url}/api/leaderboard?days=30"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let high_sc = lb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.2-sol" && m["reasoningEffort"] == "high")
+        .expect("high scorecard");
+    let xhigh_sc = lb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.2-sol" && m["reasoningEffort"] == "xhigh")
+        .expect("xhigh scorecard");
+    assert_eq!(high_sc["soloCatches"], 1);
+    assert_eq!(xhigh_sc["soloCatches"], 1);
+    assert_eq!(high_sc["p50DurationMs"], 20_000);
+    assert_eq!(xhigh_sc["p50DurationMs"], 35_000);
+
+    // Trial comparison splits champion (high) vs challenger (xhigh) separately
+    let comparison = &lb["trials"][0];
+    assert_eq!(comparison["trial"]["id"], trial_id);
+    assert_eq!(comparison["champion"]["reasoningEffort"], "high");
+    assert_eq!(comparison["challenger"]["reasoningEffort"], "xhigh");
+    assert_eq!(comparison["champion"]["soloCatches"], 1);
+    assert_eq!(comparison["challenger"]["soloCatches"], 1);
+    assert_eq!(comparison["champion"]["p50DurationMs"], 20_000);
+    assert_eq!(comparison["challenger"]["p50DurationMs"], 35_000);
+
+    // 7b. Failed primary at xhigh + retried fallback at high for same model is accepted,
+    // and adopted findings credit the successful fallback effort only.
+    let fallback_rec = client
+        .post(format!("{base_url}/api/runs"))
+        .json(&json!({
+            "runKey": "ar_eff_fallback",
+            "skill": "adversarial-review",
+            "artifactKind": "pr_diff",
+            "hostModel": "gemini-4-neon",
+            "approachVerdict": "keep",
+            "legs": [
+                { "slotIndex": 0, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "xhigh", "status": "timeout" },
+                { "slotIndex": 1, "role": "reviewer", "lineage": "openai", "model": "gpt-6.2-sol", "reasoningEffort": "high", "status": "retried", "durationMs": 22_000 }
+            ],
+            "candidates": [
+                {
+                    "summary": "Fallback catch",
+                    "severity": "important",
+                    "disposition": "adopted",
+                    "proposingModels": ["gpt-6.2-sol"]
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fallback_rec.status(), StatusCode::OK);
+
+    let lb_after_fb: Value = client
+        .get(format!("{base_url}/api/leaderboard?days=30"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let high_after_fb = lb_after_fb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.2-sol" && m["reasoningEffort"] == "high")
+        .expect("high scorecard after fallback");
+    let xhigh_after_fb = lb_after_fb["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["model"] == "gpt-6.2-sol" && m["reasoningEffort"] == "xhigh")
+        .expect("xhigh scorecard after fallback");
+    assert_eq!(high_after_fb["soloCatches"], 2);
+    assert_eq!(xhigh_after_fb["soloCatches"], 1);
+    assert_eq!(xhigh_after_fb["failuresCount"], 1);
+
+    // Host-judge affinity matrix splits cells by both host and reviewer reasoningEffort
+    let bias_cells = lb_after_fb["hostBiasMatrix"].as_array().unwrap();
+    assert_eq!(bias_cells.len(), 3);
+    assert!(bias_cells.iter().any(|c| {
+        c["hostModel"] == "gemini-4-neon"
+            && c["hostReasoningEffort"] == "high"
+            && c["reviewerModel"] == "gpt-6.2-sol"
+            && c["reviewerReasoningEffort"] == "high"
+            && c["candidatesEvaluated"] == 1
+            && c["adoptedCount"] == 1
+    }));
+    assert!(bias_cells.iter().any(|c| {
+        c["hostModel"] == "gemini-4-neon"
+            && c["hostReasoningEffort"] == "high"
+            && c["reviewerModel"] == "gpt-6.2-sol"
+            && c["reviewerReasoningEffort"] == "xhigh"
+            && c["candidatesEvaluated"] == 1
+            && c["adoptedCount"] == 1
+    }));
+    assert!(bias_cells.iter().any(|c| {
+        c["hostModel"] == "gemini-4-neon"
+            && c["hostReasoningEffort"] == ""
+            && c["reviewerModel"] == "gpt-6.2-sol"
+            && c["reviewerReasoningEffort"] == "high"
+            && c["candidatesEvaluated"] == 1
+            && c["adoptedCount"] == 1
+    }));
+
+    // 7d. Changing only championReasoningEffort during an open trial returns 409 Conflict
+    let effort_conflict = client
+        .put(format!("{base_url}/api/roster/adversarial-review"))
+        .json(&json!({
+            "slots": [
+                {
+                    "lineage": "openai",
+                    "championModel": "gpt-6.2-sol",
+                    "championReasoningEffort": "medium",
+                    "backupModel": "gpt-6.1-sol",
+                    "backupReasoningEffort": "medium",
+                    "sortOrder": 0,
+                    "enabled": true
+                }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(effort_conflict.status(), StatusCode::CONFLICT);
+
+    // 7c. Plan-tournament lens matrix splits same model across reasoning efforts
+    for (run_key, effort, won, picks) in [
+        ("pt_eff_high", "high", false, 1),
+        ("pt_eff_xhigh", "xhigh", true, 0),
+    ] {
+        let rec = client
+            .post(format!("{base_url}/api/runs"))
+            .json(&json!({
+                "runKey": run_key,
+                "skill": "plan-tournament",
+                "artifactKind": "plan",
+                "hostModel": "gemini-4-neon",
+                "winningRole": if won { "edge_cases" } else { "minimal_diff" },
+                "legs": [
+                    {
+                        "slotIndex": 0,
+                        "role": "edge_cases",
+                        "lineage": "openai",
+                        "model": "gpt-6.2-sol",
+                        "reasoningEffort": effort,
+                        "status": "ok",
+                        "wonCorePlan": won,
+                        "cherryPicksCount": picks
+                    }
+                ]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), StatusCode::OK);
+    }
+    let pt_lb: Value = client
+        .get(format!(
+            "{base_url}/api/leaderboard?skill=plan-tournament&days=30"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let lens_cells = pt_lb["lensMatrix"].as_array().unwrap();
+    let high_cell = lens_cells
+        .iter()
+        .find(|c| {
+            c["model"] == "gpt-6.2-sol"
+                && c["reasoningEffort"] == "high"
+                && c["lens"] == "edge_cases"
+        })
+        .expect("high lens cell");
+    let xhigh_cell = lens_cells
+        .iter()
+        .find(|c| {
+            c["model"] == "gpt-6.2-sol"
+                && c["reasoningEffort"] == "xhigh"
+                && c["lens"] == "edge_cases"
+        })
+        .expect("xhigh lens cell");
+    assert_eq!(high_cell["wins"], 0);
+    assert_eq!(high_cell["cherryPicks"], 1);
+    assert_eq!(xhigh_cell["wins"], 1);
+    assert_eq!(xhigh_cell["cherryPicks"], 0);
+
+    // 8. Promoting the effort trial rotates (gpt-6.2-sol, high) to backup and promotes (gpt-6.2-sol, xhigh)
+    let decide = client
+        .post(format!("{base_url}/api/trials/{trial_id}/decide"))
+        .json(&json!({ "decision": "promote" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(decide.status(), StatusCode::OK);
+
+    let roster_after: Value = client
+        .get(format!("{base_url}/api/roster?skill=adversarial-review"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let openai_slot = roster_after["roster"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["lineage"] == "openai")
+        .expect("openai slot");
+    assert_eq!(openai_slot["championModel"], "gpt-6.2-sol");
+    assert_eq!(openai_slot["championReasoningEffort"], "xhigh");
+    assert_eq!(openai_slot["backupModel"], "gpt-6.2-sol");
+    assert_eq!(openai_slot["backupReasoningEffort"], "high");
+
+    // 9. Coding leaderboard splits same model by reasoningEffort
+    for (run_key, effort) in [("cr_eff_1", "medium"), ("cr_eff_2", "high")] {
+        let rec = client
+            .post(format!("{base_url}/api/coding-runs"))
+            .json(&json!({
+                "runKey": run_key,
+                "model": "claude-opus-5.5",
+                "reasoningEffort": effort,
+                "taskKind": "feature",
+                "locAdded": 40,
+                "locDeleted": 10,
+                "firstPassClean": true,
+                "mergedWithoutFollowup24h": true
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), StatusCode::OK);
+    }
+
+    let coding_lb: Value = client
+        .get(format!("{base_url}/api/coding-leaderboard?days=30"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(coding_lb["models"].as_array().unwrap().len(), 2);
+    let slices = coding_lb["slices"].as_array().unwrap();
+    assert_eq!(slices.len(), 2);
+    assert!(
+        slices
+            .iter()
+            .any(|s| s["model"] == "claude-opus-5.5" && s["reasoningEffort"] == "medium")
+    );
+    assert!(
+        slices
+            .iter()
+            .any(|s| s["model"] == "claude-opus-5.5" && s["reasoningEffort"] == "high")
+    );
 
     tdb.teardown().await;
 }

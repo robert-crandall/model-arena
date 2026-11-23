@@ -402,6 +402,7 @@ export interface components {
             p90TimeToGreenSec: number;
             /** Format: int32 */
             p90TimeToMergeSec: number;
+            reasoningEffort?: string;
             /** Format: int32 */
             totalCcrActionable: number;
             /** Format: int32 */
@@ -448,6 +449,8 @@ export interface components {
             /** Format: int32 */
             promptTurnCount?: number;
             queueOnly?: boolean;
+            /** @enum {string} */
+            reasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             /** Format: int32 */
             redCiPushes?: number;
             repo?: string;
@@ -495,6 +498,7 @@ export interface components {
             prNumber: number;
             /** Format: int32 */
             promptTurnCount: number;
+            reasoningEffort?: string;
             /** Format: date-time */
             recordedAt: string;
             /** Format: int32 */
@@ -520,6 +524,7 @@ export interface components {
             model: string;
             /** Format: int32 */
             p50TimeToMergeSec: number;
+            reasoningEffort?: string;
             /** Format: int32 */
             runs: number;
             sizeBucket: string;
@@ -558,8 +563,10 @@ export interface components {
             candidatesEvaluated: number;
             hostLineage: string;
             hostModel: string;
+            hostReasoningEffort?: string;
             reviewerLineage: string;
             reviewerModel: string;
+            reviewerReasoningEffort?: string;
         };
         Leaderboard: {
             hostBiasMatrix: components["schemas"]["HostBiasCell"][];
@@ -578,6 +585,7 @@ export interface components {
             cherryPicks: number;
             lens: string;
             model: string;
+            reasoningEffort?: string;
             /** Format: int32 */
             runs: number;
             /** Format: double */
@@ -625,6 +633,7 @@ export interface components {
             plannerRuns: number;
             /** Format: double */
             precision: number;
+            reasoningEffort?: string;
             /** Format: int32 */
             retriedCount: number;
             /** Format: int32 */
@@ -669,9 +678,11 @@ export interface components {
         };
         PanelLeg: {
             backupModel?: string;
+            backupReasoningEffort?: string;
             isChallenger: boolean;
             lineage: string;
             model: string;
+            reasoningEffort?: string;
             role: string;
             /** Format: int32 */
             slotIndex: number;
@@ -696,6 +707,7 @@ export interface components {
             candidates: components["schemas"]["RunCandidateView"][];
             harness: string;
             hostModel: string;
+            hostReasoningEffort?: string;
             /** Format: int64 */
             id: number;
             legs: components["schemas"]["RunLegView"][];
@@ -719,6 +731,8 @@ export interface components {
             harness?: string;
             hostLineage?: string;
             hostModel?: string;
+            /** @enum {string} */
+            hostReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             legs: components["schemas"]["RunLegInput"][];
             machine?: string;
             /** Format: date-time */
@@ -757,7 +771,9 @@ export interface components {
         };
         RosterEntry: {
             backupModel: string;
+            backupReasoningEffort?: string;
             championModel: string;
+            championReasoningEffort?: string;
             enabled: boolean;
             lineage: string;
             skill: string;
@@ -771,7 +787,11 @@ export interface components {
         };
         RosterSlotInput: {
             backupModel?: string;
+            /** @enum {string} */
+            backupReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             championModel: string;
+            /** @enum {string} */
+            championReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             enabled?: boolean;
             /** @description Model lineage (for example: openai, anthropic, google). */
             lineage: string;
@@ -809,6 +829,8 @@ export interface components {
             lineage?: string;
             /** @description Executed model ID for this leg. */
             model: string;
+            /** @enum {string} */
+            reasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             /** @description Leg role: reviewer or ponytail for adversarial-review; minimal_diff, clean_architecture, edge_cases, critic, or explore_scout for plan-tournament. */
             role: string;
             /**
@@ -835,6 +857,7 @@ export interface components {
             isChallenger: boolean;
             lineage: string;
             model: string;
+            reasoningEffort?: string;
             role: string;
             /** Format: int32 */
             slotIndex: number;
@@ -852,6 +875,8 @@ export interface components {
         StartTrialInput: {
             allowPrDiff?: boolean;
             challengerModel: string;
+            /** @enum {string} */
+            challengerReasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
             /** @description Roster lineage (for example: openai, anthropic, google). */
             lineage: string;
             /** @description Skill for the bout: adversarial-review or plan-tournament. */
@@ -864,7 +889,9 @@ export interface components {
         Trial: {
             allowPrDiff: boolean;
             challengerModel: string;
+            challengerReasoningEffort?: string;
             championModel: string;
+            championReasoningEffort?: string;
             /** Format: int32 */
             completedRuns: number;
             /** Format: date-time */

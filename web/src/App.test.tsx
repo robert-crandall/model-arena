@@ -590,6 +590,7 @@ describe("Model Arena SPA foundation", () => {
     };
     const sampleCard = {
       model: "claude-opus-4.7",
+      reasoningEffort: "high",
       lineage: "claude",
       isCurrentChampion: true,
       activeChallengerTrialId: null,
@@ -625,6 +626,7 @@ describe("Model Arena SPA foundation", () => {
       lensMatrix: [
         {
           model: "claude-opus-4.7",
+          reasoningEffort: "high",
           lens: "minimalist",
           runs: 1,
           wins: 1,
@@ -636,8 +638,10 @@ describe("Model Arena SPA foundation", () => {
         {
           hostLineage: "gemini",
           hostModel: "gemini-3.1-pro",
+          hostReasoningEffort: "medium",
           reviewerLineage: "claude",
           reviewerModel: "claude-opus-4.7",
+          reviewerReasoningEffort: "high",
           candidatesEvaluated: 6,
           adoptedCount: 5,
           adoptionRate: 0.8333,
@@ -650,7 +654,9 @@ describe("Model Arena SPA foundation", () => {
             skill: "adversarial-review",
             lineage: "gpt",
             championModel: "gpt-5.4",
-            challengerModel: "gpt-5.5-preview",
+            championReasoningEffort: "high",
+            challengerModel: "gpt-5.4",
+            challengerReasoningEffort: "xhigh",
             swapPercent: 30,
             targetRuns: 10,
             completedRuns: 10,
@@ -662,13 +668,15 @@ describe("Model Arena SPA foundation", () => {
           champion: {
             ...sampleCard,
             model: "gpt-5.4",
+            reasoningEffort: "high",
             lineage: "gpt",
             precision: 0.8,
             p50DurationMs: 45000,
           },
           challenger: {
             ...sampleCard,
-            model: "gpt-5.5-preview",
+            model: "gpt-5.4",
+            reasoningEffort: "xhigh",
             lineage: "gpt",
             precision: 0.9,
             p50DurationMs: 22000,
@@ -685,7 +693,9 @@ describe("Model Arena SPA foundation", () => {
           skill: "adversarial-review",
           lineage: "claude",
           championModel: "claude-opus-4.7",
+          championReasoningEffort: "high",
           backupModel: "claude-sonnet-4.6",
+          backupReasoningEffort: "",
           sortOrder: 0,
           enabled: true,
           updatedAt: "2026-04-20T00:00:00Z",
@@ -701,6 +711,7 @@ describe("Model Arena SPA foundation", () => {
           machine: "mbp",
           harness: "copilot-cli",
           hostModel: "gemini-3.1-pro",
+          hostReasoningEffort: "",
           artifactKind: "pr_diff",
           artifactRef: "PR #5",
           approachVerdict: "sound",
@@ -716,6 +727,7 @@ describe("Model Arena SPA foundation", () => {
       models: [
         {
           model: "claude-opus-4.7",
+          reasoningEffort: "high",
           lineage: "claude",
           totalRuns: 2,
           mergedRuns: 2,
@@ -753,7 +765,7 @@ describe("Model Arena SPA foundation", () => {
     dispose = render(() => <App />, host);
 
     await waitFor(() => {
-      expect(host.textContent).toContain("claude-opus-4.7");
+      expect(host.textContent).toContain("claude-opus-4.7 (high)");
       expect(host.textContent).toContain("28.0s / 42.0s");
     });
 
@@ -767,6 +779,7 @@ describe("Model Arena SPA foundation", () => {
     codingTab.click();
     flush();
     expect(host.textContent).toContain("Single-model coding & PR profiles");
+    expect(host.textContent).toContain("claude-opus-4.7 (high)");
     expect(host.textContent).toContain("3.0m / 4.0m");
 
     const trialsTab = tabs.find((btn) =>
@@ -774,10 +787,21 @@ describe("Model Arena SPA foundation", () => {
     )!;
     trialsTab.click();
     flush();
-    expect(host.textContent).toContain("gpt-5.5-preview");
+    expect(host.textContent).toContain("gpt-5.4 (high)");
+    expect(host.textContent).toContain("gpt-5.4 (xhigh)");
+    expect(host.textContent).toContain("claude-sonnet-4.6");
+    expect(host.textContent).not.toContain("claude-sonnet-4.6 ()");
     expect(host.textContent).toContain(
       "Challenger leads quality (+0.220 score)",
     );
+
+    const historyTab = tabs.find((btn) =>
+      btn.textContent?.includes("Matrices & History"),
+    )!;
+    historyTab.click();
+    flush();
+    expect(host.textContent).toContain("gemini-3.1-pro (medium)");
+    expect(host.textContent).toContain("claude-opus-4.7 (high)");
 
     // Ensure there are no buttons to promote or retire trials in the UI
     const allButtons = Array.from(host.querySelectorAll("button")).map((b) =>
