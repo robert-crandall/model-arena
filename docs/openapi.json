@@ -1651,6 +1651,9 @@
             "type": "integer",
             "format": "int32"
           },
+          "reasoningEffort": {
+            "type": "string"
+          },
           "totalCcrActionable": {
             "type": "integer",
             "format": "int32"
@@ -1763,6 +1766,9 @@
           },
           "queueOnly": {
             "type": "boolean"
+          },
+          "reasoningEffort": {
+            "type": "string"
           },
           "redCiPushes": {
             "type": "integer",
@@ -1904,6 +1910,9 @@
             "type": "integer",
             "format": "int32"
           },
+          "reasoningEffort": {
+            "type": "string"
+          },
           "recordedAt": {
             "type": "string",
             "format": "date-time"
@@ -1970,6 +1979,9 @@
           "p50TimeToMergeSec": {
             "type": "integer",
             "format": "int32"
+          },
+          "reasoningEffort": {
+            "type": "string"
           },
           "runs": {
             "type": "integer",
@@ -2178,6 +2190,9 @@
           "model": {
             "type": "string"
           },
+          "reasoningEffort": {
+            "type": "string"
+          },
           "runs": {
             "type": "integer",
             "format": "int32"
@@ -2315,6 +2330,9 @@
             "type": "number",
             "format": "double"
           },
+          "reasoningEffort": {
+            "type": "string"
+          },
           "retriedCount": {
             "type": "integer",
             "format": "int32"
@@ -2427,6 +2445,9 @@
           "backupModel": {
             "type": "string"
           },
+          "backupReasoningEffort": {
+            "type": "string"
+          },
           "isChallenger": {
             "type": "boolean"
           },
@@ -2434,6 +2455,9 @@
             "type": "string"
           },
           "model": {
+            "type": "string"
+          },
+          "reasoningEffort": {
             "type": "string"
           },
           "role": {
@@ -2538,6 +2562,9 @@
           "hostModel": {
             "type": "string"
           },
+          "hostReasoningEffort": {
+            "type": "string"
+          },
           "id": {
             "type": "integer",
             "format": "int64"
@@ -2606,6 +2633,9 @@
             "type": "string"
           },
           "hostModel": {
+            "type": "string"
+          },
+          "hostReasoningEffort": {
             "type": "string"
           },
           "legs": {
@@ -2743,7 +2773,13 @@
           "backupModel": {
             "type": "string"
           },
+          "backupReasoningEffort": {
+            "type": "string"
+          },
           "championModel": {
+            "type": "string"
+          },
+          "championReasoningEffort": {
             "type": "string"
           },
           "enabled": {
@@ -2789,7 +2825,13 @@
           "backupModel": {
             "type": "string"
           },
+          "backupReasoningEffort": {
+            "type": "string"
+          },
           "championModel": {
+            "type": "string"
+          },
+          "championReasoningEffort": {
             "type": "string"
           },
           "enabled": {
@@ -2889,6 +2931,9 @@
           "model": {
             "type": "string"
           },
+          "reasoningEffort": {
+            "type": "string"
+          },
           "role": {
             "type": "string"
           },
@@ -2952,6 +2997,9 @@
           "model": {
             "type": "string"
           },
+          "reasoningEffort": {
+            "type": "string"
+          },
           "role": {
             "type": "string"
           },
@@ -3011,6 +3059,9 @@
           "challengerModel": {
             "type": "string"
           },
+          "challengerReasoningEffort": {
+            "type": "string"
+          },
           "lineage": {
             "type": "string"
           },
@@ -3052,7 +3103,13 @@
           "challengerModel": {
             "type": "string"
           },
+          "challengerReasoningEffort": {
+            "type": "string"
+          },
           "championModel": {
+            "type": "string"
+          },
+          "championReasoningEffort": {
             "type": "string"
           },
           "completedRuns": {

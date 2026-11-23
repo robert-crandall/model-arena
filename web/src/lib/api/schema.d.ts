@@ -399,6 +399,7 @@ export interface components {
             p90TimeToGreenSec: number;
             /** Format: int32 */
             p90TimeToMergeSec: number;
+            reasoningEffort?: string;
             /** Format: int32 */
             totalCcrActionable: number;
             /** Format: int32 */
@@ -445,6 +446,7 @@ export interface components {
             /** Format: int32 */
             promptTurnCount?: number;
             queueOnly?: boolean;
+            reasoningEffort?: string;
             /** Format: int32 */
             redCiPushes?: number;
             repo?: string;
@@ -491,6 +493,7 @@ export interface components {
             prNumber: number;
             /** Format: int32 */
             promptTurnCount: number;
+            reasoningEffort?: string;
             /** Format: date-time */
             recordedAt: string;
             /** Format: int32 */
@@ -516,6 +519,7 @@ export interface components {
             model: string;
             /** Format: int32 */
             p50TimeToMergeSec: number;
+            reasoningEffort?: string;
             /** Format: int32 */
             runs: number;
             sizeBucket: string;
@@ -573,6 +577,7 @@ export interface components {
             cherryPicks: number;
             lens: string;
             model: string;
+            reasoningEffort?: string;
             /** Format: int32 */
             runs: number;
             /** Format: double */
@@ -620,6 +625,7 @@ export interface components {
             plannerRuns: number;
             /** Format: double */
             precision: number;
+            reasoningEffort?: string;
             /** Format: int32 */
             retriedCount: number;
             /** Format: int32 */
@@ -663,9 +669,11 @@ export interface components {
         };
         PanelLeg: {
             backupModel?: string;
+            backupReasoningEffort?: string;
             isChallenger: boolean;
             lineage: string;
             model: string;
+            reasoningEffort?: string;
             role: string;
             /** Format: int32 */
             slotIndex: number;
@@ -690,6 +698,7 @@ export interface components {
             candidates: components["schemas"]["RunCandidateView"][];
             harness: string;
             hostModel: string;
+            hostReasoningEffort?: string;
             /** Format: int64 */
             id: number;
             legs: components["schemas"]["RunLegView"][];
@@ -711,6 +720,7 @@ export interface components {
             harness?: string;
             hostLineage?: string;
             hostModel?: string;
+            hostReasoningEffort?: string;
             legs: components["schemas"]["RunLegInput"][];
             machine?: string;
             /** Format: date-time */
@@ -746,7 +756,9 @@ export interface components {
         };
         RosterEntry: {
             backupModel: string;
+            backupReasoningEffort?: string;
             championModel: string;
+            championReasoningEffort?: string;
             enabled: boolean;
             lineage: string;
             skill: string;
@@ -760,7 +772,9 @@ export interface components {
         };
         RosterSlotInput: {
             backupModel?: string;
+            backupReasoningEffort?: string;
             championModel: string;
+            championReasoningEffort?: string;
             enabled?: boolean;
             lineage: string;
             /** Format: int32 */
@@ -792,6 +806,7 @@ export interface components {
             isChallenger?: boolean;
             lineage?: string;
             model: string;
+            reasoningEffort?: string;
             role: string;
             /** Format: int32 */
             slotIndex: number;
@@ -812,6 +827,7 @@ export interface components {
             isChallenger: boolean;
             lineage: string;
             model: string;
+            reasoningEffort?: string;
             role: string;
             /** Format: int32 */
             slotIndex: number;
@@ -827,6 +843,7 @@ export interface components {
         StartTrialInput: {
             allowPrDiff?: boolean;
             challengerModel: string;
+            challengerReasoningEffort?: string;
             lineage: string;
             skill: string;
             /** Format: int32 */
@@ -837,7 +854,9 @@ export interface components {
         Trial: {
             allowPrDiff: boolean;
             challengerModel: string;
+            challengerReasoningEffort?: string;
             championModel: string;
+            championReasoningEffort?: string;
             /** Format: int32 */
             completedRuns: number;
             /** Format: date-time */

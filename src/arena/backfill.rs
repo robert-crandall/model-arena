@@ -15,8 +15,13 @@ use crate::arena::service::validate_and_normalize_record_run_input;
 use crate::arena::spool::{SpoolScope, submit_or_spool_run};
 use crate::arena::types::{
     CandidateInput, RecordRunInput, RunLegInput, SKILL_ADVERSARIAL_REVIEW, SKILL_PLAN_TOURNAMENT,
-    TOURNAMENT_LENSES, infer_lineage,
+    TOURNAMENT_LENSES, infer_lineage, normalize_reasoning_effort,
 };
+
+fn normalize_effort_lossy(raw: Option<&str>) -> String {
+    raw.and_then(|s| normalize_reasoning_effort(s).ok())
+        .unwrap_or_default()
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -138,6 +143,8 @@ struct SessionStartData {
     start_time: String,
     #[serde(default)]
     selected_model: String,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -147,6 +154,8 @@ struct ModelChangeData {
     source: String,
     #[serde(default)]
     new_model: String,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +174,8 @@ struct ToolStartArgs {
     agent_type: String,
     #[serde(default)]
     model: String,
+    #[serde(default, alias = "reasoningEffort")]
+    reasoning_effort: Option<String>,
     #[serde(default)]
     description: String,
     #[serde(default)]
@@ -219,6 +230,7 @@ pub fn parse_session_events_file(
     let reader = BufReader::new(file);
 
     let mut host_model = String::new();
+    let mut host_reasoning_effort = String::new();
     let mut session_start: Option<DateTime<Utc>> = None;
     let mut active_skill = String::new();
     let mut pending_legs: Vec<RunLegInput> = Vec::new();
@@ -289,6 +301,7 @@ pub fn parse_session_events_file(
             "session.start" => {
                 if let Ok(d) = serde_json::from_value::<SessionStartData>(ev.data) {
                     host_model = d.selected_model.trim().to_string();
+                    host_reasoning_effort = normalize_effort_lossy(d.reasoning_effort.as_deref());
                     if let Ok(dt) = DateTime::parse_from_rfc3339(&d.start_time) {
                         session_start = Some(dt.with_timezone(&Utc));
                     }
@@ -297,9 +310,15 @@ pub fn parse_session_events_file(
             "session.model_change" => {
                 if let Ok(d) = serde_json::from_value::<ModelChangeData>(ev.data)
                     && d.source != "agent"
-                    && !d.new_model.trim().is_empty()
                 {
-                    host_model = d.new_model.trim().to_string();
+                    if !d.new_model.trim().is_empty() {
+                        host_model = d.new_model.trim().to_string();
+                        host_reasoning_effort =
+                            normalize_effort_lossy(d.reasoning_effort.as_deref());
+                    } else if d.reasoning_effort.is_some() {
+                        host_reasoning_effort =
+                            normalize_effort_lossy(d.reasoning_effort.as_deref());
+                    }
                 }
             }
             "user.message" => {
@@ -415,6 +434,8 @@ pub fn parse_session_events_file(
 
                 if d.tool_name == "task" && !d.arguments.model.trim().is_empty() {
                     let m = d.arguments.model.trim().to_string();
+                    let leg_effort =
+                        normalize_effort_lossy(d.arguments.reasoning_effort.as_deref());
                     let m_lower = m.to_ascii_lowercase();
                     if !known_models.contains(&m_lower) {
                         known_models.push(m_lower);
@@ -444,6 +465,7 @@ pub fn parse_session_events_file(
                             role: "critic".to_string(),
                             lineage: String::new(),
                             model: m,
+                            reasoning_effort: leg_effort,
                             is_challenger: false,
                             trial_id: None,
                             status: leg_status,
@@ -507,6 +529,7 @@ pub fn parse_session_events_file(
                             role,
                             lineage: String::new(),
                             model: m,
+                            reasoning_effort: leg_effort,
                             is_challenger: false,
                             trial_id: None,
                             status: leg_status,
@@ -638,6 +661,7 @@ pub fn parse_session_events_file(
                     session_id,
                     turn_counter,
                     &host_model,
+                    &host_reasoning_effort,
                     machine,
                     ev_time,
                     &candidate_legs,
@@ -680,6 +704,7 @@ pub fn parse_session_events_file(
                         session_id,
                         turn_counter,
                         &host_model,
+                        &host_reasoning_effort,
                         machine,
                         ev_time,
                         &sr.legs,
@@ -714,6 +739,7 @@ pub fn parse_session_events_file(
                     session_id,
                     turn_counter,
                     &host_model,
+                    &host_reasoning_effort,
                     machine,
                     ev_time,
                     &pending_legs,
@@ -991,6 +1017,7 @@ fn extract_adversarial_review_report(
     session_id: &str,
     turn_index: usize,
     host_model: &str,
+    host_reasoning_effort: &str,
     machine: &str,
     occurred_at: Option<DateTime<Utc>>,
     pending_legs: &[RunLegInput],
@@ -1026,6 +1053,7 @@ fn extract_adversarial_review_report(
                             role: "reviewer".to_string(),
                             lineage: String::new(),
                             model: m.clone(),
+                            reasoning_effort: String::new(),
                             is_challenger: false,
                             trial_id: None,
                             status: "ok".to_string(),
@@ -1070,6 +1098,7 @@ fn extract_adversarial_review_report(
         repo,
         phase: "independent".to_string(),
         host_model: host_model.to_string(),
+        host_reasoning_effort: host_reasoning_effort.to_string(),
         host_lineage: String::new(),
         harness: "copilot-backfill".to_string(),
         machine: machine.to_string(),
@@ -1126,11 +1155,13 @@ fn role_cues_for(role: &str) -> &'static [&'static str] {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn extract_plan_tournament_report(
     content: &str,
     session_id: &str,
     turn_index: usize,
     host_model: &str,
+    host_reasoning_effort: &str,
     machine: &str,
     occurred_at: Option<DateTime<Utc>>,
     pending_legs: &[RunLegInput],
@@ -1313,6 +1344,7 @@ fn extract_plan_tournament_report(
         repo,
         phase: "independent".to_string(),
         host_model: host_model.to_string(),
+        host_reasoning_effort: host_reasoning_effort.to_string(),
         host_lineage: String::new(),
         harness: "copilot-backfill".to_string(),
         machine: machine.to_string(),
@@ -1505,5 +1537,38 @@ mod tests {
             ),
             "reviewer"
         );
+    }
+
+    #[test]
+    fn parses_nullable_reasoning_effort_and_resets_host_effort_on_model_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let events_path = dir.path().join("events.jsonl");
+        let mut f = File::create(&events_path).unwrap();
+
+        let lines = [
+            r#"{"type":"session.start","timestamp":"2026-03-02T10:00:00Z","data":{"startTime":"2026-03-02T10:00:00Z","selectedModel":"claude-opus-5.5","reasoningEffort":"high"}}"#,
+            r#"{"type":"session.model_change","timestamp":"2026-03-02T10:00:02Z","data":{"source":"user","newModel":"gemini-4-neon","reasoningEffort":null}}"#,
+            r#"{"type":"skill.invoked","timestamp":"2026-03-02T10:00:05Z","data":{"name":"adversarial-review"}}"#,
+            r#"{"type":"tool.execution_start","timestamp":"2026-03-02T10:00:10Z","data":{"toolCallId":"t1","toolName":"task","arguments":{"name":"rev-a","agent_type":"rubber-duck","model":"gpt-6.2-sol","reasoning_effort":"xhigh","description":"Adversarial review"}}}"#,
+            r#"{"type":"tool.execution_complete","timestamp":"2026-03-02T10:00:40Z","data":{"toolCallId":"t1","success":true}}"#,
+            r#"{"type":"tool.execution_start","timestamp":"2026-03-02T10:00:10Z","data":{"toolCallId":"t2","toolName":"task","arguments":{"name":"rev-b","agent_type":"rubber-duck","model":"claude-opus-5.5","reasoningEffort":"turbo","description":"Adversarial review"}}}"#,
+            r#"{"type":"tool.execution_complete","timestamp":"2026-03-02T10:00:50Z","data":{"toolCallId":"t2","success":true}}"#,
+            r#"{"type":"assistant.message","timestamp":"2026-03-02T10:01:00Z","data":{"content":"Adversarial review for owner/repo#99\nApproach: keep\nFindings:\n- gpt-6.2-sol caught race condition\nSet aside:\n- claude-opus-5.5 style nit"}}"#,
+        ];
+        for line in lines {
+            writeln!(f, "{line}").unwrap();
+        }
+        drop(f);
+
+        let runs = parse_session_events_file(&events_path, "sess-effort", "macbook");
+        assert_eq!(runs.len(), 1);
+        let r = &runs[0];
+        assert_eq!(r.host_model, "gemini-4-neon");
+        assert_eq!(r.host_reasoning_effort, "");
+        assert_eq!(r.legs.len(), 2);
+        assert_eq!(r.legs[0].model, "gpt-6.2-sol");
+        assert_eq!(r.legs[0].reasoning_effort, "xhigh");
+        assert_eq!(r.legs[1].model, "claude-opus-5.5");
+        assert_eq!(r.legs[1].reasoning_effort, "");
     }
 }

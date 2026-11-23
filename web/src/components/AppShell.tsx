@@ -37,6 +37,10 @@ function formatSeconds(sec: number): string {
   return `${(sec / 60).toFixed(1)}m`;
 }
 
+function formatModelLabel(model: string, effort?: string): string {
+  return effort ? `${model} (${effort})` : model;
+}
+
 export function AppShell(props: { user: User }) {
   const auth = useAuth();
   const [activeTab, setActiveTab] = createSignal<ArenaTab>("review");
@@ -446,7 +450,12 @@ export function AppShell(props: { user: User }) {
                           {(card) => (
                             <tr>
                               <td>
-                                <code>{card.model}</code>
+                                <code>
+                                  {formatModelLabel(
+                                    card.model,
+                                    card.reasoningEffort,
+                                  )}
+                                </code>
                               </td>
                               <td>{card.lineage}</td>
                               <td>{card.reviewRuns}</td>
@@ -505,7 +514,12 @@ export function AppShell(props: { user: User }) {
                           {(card) => (
                             <tr>
                               <td>
-                                <code>{card.model}</code>
+                                <code>
+                                  {formatModelLabel(
+                                    card.model,
+                                    card.reasoningEffort,
+                                  )}
+                                </code>
                               </td>
                               <td>{card.lineage}</td>
                               <td>{card.plannerRuns}</td>
@@ -564,7 +578,12 @@ export function AppShell(props: { user: User }) {
                           {(card) => (
                             <tr>
                               <td>
-                                <code>{card.model}</code>
+                                <code>
+                                  {formatModelLabel(
+                                    card.model,
+                                    card.reasoningEffort,
+                                  )}
+                                </code>
                               </td>
                               <td>{card.lineage}</td>
                               <td>{card.totalRuns}</td>
@@ -628,8 +647,19 @@ export function AppShell(props: { user: User }) {
                                 {item.trial.skill} / {item.trial.lineage}
                               </td>
                               <td>
-                                <code>{item.trial.championModel}</code> vs{" "}
-                                <code>{item.trial.challengerModel}</code>
+                                <code>
+                                  {formatModelLabel(
+                                    item.trial.championModel,
+                                    item.trial.championReasoningEffort,
+                                  )}
+                                </code>{" "}
+                                vs{" "}
+                                <code>
+                                  {formatModelLabel(
+                                    item.trial.challengerModel,
+                                    item.trial.challengerReasoningEffort,
+                                  )}
+                                </code>
                               </td>
                               <td>
                                 {item.trial.completedRuns} /{" "}
@@ -682,10 +712,22 @@ export function AppShell(props: { user: User }) {
                               <td>{slot.skill}</td>
                               <td>{slot.lineage}</td>
                               <td>
-                                <code>{slot.championModel}</code>
+                                <code>
+                                  {formatModelLabel(
+                                    slot.championModel,
+                                    slot.championReasoningEffort,
+                                  )}
+                                </code>
                               </td>
                               <td>
-                                <code>{slot.backupModel || "—"}</code>
+                                <code>
+                                  {slot.backupModel
+                                    ? formatModelLabel(
+                                        slot.backupModel,
+                                        slot.backupReasoningEffort,
+                                      )
+                                    : "—"}
+                                </code>
                               </td>
                               <td>{slot.enabled ? "Enabled" : "Disabled"}</td>
                             </tr>
@@ -720,7 +762,12 @@ export function AppShell(props: { user: User }) {
                           {(cell) => (
                             <tr>
                               <td>
-                                <code>{cell.model}</code>
+                                <code>
+                                  {formatModelLabel(
+                                    cell.model,
+                                    cell.reasoningEffort,
+                                  )}
+                                </code>
                               </td>
                               <td>{cell.lens}</td>
                               <td>{cell.runs}</td>

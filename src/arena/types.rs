@@ -30,6 +30,8 @@ pub const VALID_CANDIDATE_SEVERITIES: [&str; 3] = ["blocking", "important", "min
 pub const VALID_CANDIDATE_DISPOSITIONS: [&str; 3] = ["adopted", "set_aside", "open_question"];
 pub const VALID_TASK_KINDS: [&str; 5] = ["feature", "bugfix", "refactor", "cleanup", "other"];
 pub const VALID_SIZE_BUCKETS: [&str; 3] = ["S", "M", "L"];
+pub const VALID_REASONING_EFFORTS: [&str; 7] =
+    ["", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, sqlx::FromRow, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -37,7 +39,11 @@ pub struct RosterEntry {
     pub skill: String,
     pub lineage: String,
     pub champion_model: String,
+    #[serde(default)]
+    pub champion_reasoning_effort: String,
     pub backup_model: String,
+    #[serde(default)]
+    pub backup_reasoning_effort: String,
     pub sort_order: i32,
     pub enabled: bool,
     pub updated_at: DateTime<Utc>,
@@ -49,7 +55,11 @@ pub struct RosterSlotInput {
     pub lineage: String,
     pub champion_model: String,
     #[serde(default)]
+    pub champion_reasoning_effort: String,
+    #[serde(default)]
     pub backup_model: String,
+    #[serde(default)]
+    pub backup_reasoning_effort: String,
     #[serde(default)]
     pub sort_order: i32,
     #[serde(default = "default_true")]
@@ -85,7 +95,11 @@ pub struct Trial {
     pub skill: String,
     pub lineage: String,
     pub champion_model: String,
+    #[serde(default)]
+    pub champion_reasoning_effort: String,
     pub challenger_model: String,
+    #[serde(default)]
+    pub challenger_reasoning_effort: String,
     pub target_runs: i32,
     pub completed_runs: i32,
     pub swap_percent: i32,
@@ -102,6 +116,8 @@ pub struct StartTrialInput {
     pub skill: String,
     pub lineage: String,
     pub challenger_model: String,
+    #[serde(default)]
+    pub challenger_reasoning_effort: String,
     pub target_runs: i32,
     #[serde(default)]
     pub swap_percent: Option<i32>,
@@ -135,7 +151,11 @@ pub struct PanelLeg {
     pub lineage: String,
     pub model: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reasoning_effort: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub backup_model: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub backup_reasoning_effort: String,
     pub is_challenger: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trial_id: Option<i64>,
@@ -162,6 +182,8 @@ pub struct RunLegInput {
     #[serde(default)]
     pub lineage: String,
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     #[serde(default)]
     pub is_challenger: bool,
     #[serde(default)]
@@ -210,6 +232,8 @@ pub struct RecordRunInput {
     pub phase: String,
     #[serde(default)]
     pub host_model: String,
+    #[serde(default)]
+    pub host_reasoning_effort: String,
     #[serde(default)]
     pub host_lineage: String,
     #[serde(default)]
@@ -281,6 +305,8 @@ pub struct LeaderboardQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ModelScorecard {
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     pub lineage: String,
     pub is_current_champion: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -315,6 +341,8 @@ pub struct ModelScorecard {
 #[serde(rename_all = "camelCase")]
 pub struct LensCell {
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     pub lens: String,
     pub runs: i32,
     pub wins: i32,
@@ -368,6 +396,8 @@ pub struct RunLegView {
     pub role: String,
     pub lineage: String,
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     pub is_challenger: bool,
     pub status: String,
     pub duration_ms: i32,
@@ -387,6 +417,8 @@ pub struct RecentRunView {
     pub artifact_ref: String,
     pub repo: String,
     pub host_model: String,
+    #[serde(default)]
+    pub host_reasoning_effort: String,
     pub harness: String,
     pub machine: String,
     pub approach_verdict: String,
@@ -414,6 +446,8 @@ pub struct Leaderboard {
 pub struct CodingRunInput {
     pub run_key: String,
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     #[serde(default)]
     pub lineage: String,
     #[serde(default)]
@@ -476,6 +510,8 @@ pub struct CodingRunRecord {
     pub id: i64,
     pub run_key: String,
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     pub lineage: String,
     pub harness: String,
     pub repo: String,
@@ -558,6 +594,8 @@ pub struct CodingLeaderboardQuery {
 #[serde(rename_all = "camelCase")]
 pub struct CodingModelProfile {
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     pub lineage: String,
     pub total_runs: i32,
     pub merged_runs: i32,
@@ -590,6 +628,8 @@ pub struct CodingModelProfile {
 #[serde(rename_all = "camelCase")]
 pub struct CodingSliceCell {
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: String,
     pub size_bucket: String,
     pub task_kind: String,
     pub runs: i32,
@@ -612,6 +652,25 @@ pub struct CodingLeaderboard {
 
 pub fn is_valid_skill(skill: &str) -> bool {
     matches!(skill, SKILL_ADVERSARIAL_REVIEW | SKILL_PLAN_TOURNAMENT)
+}
+
+pub fn normalize_reasoning_effort(raw: &str) -> Result<String, String> {
+    let norm = raw.trim().to_ascii_lowercase();
+    if VALID_REASONING_EFFORTS.contains(&norm.as_str()) {
+        Ok(norm)
+    } else {
+        Err(format!(
+            "invalid reasoningEffort {raw:?}: must be one of {:?}",
+            VALID_REASONING_EFFORTS
+        ))
+    }
+}
+
+pub fn model_effort_key(model: &str, reasoning_effort: &str) -> (String, String) {
+    (
+        model.trim().to_ascii_lowercase(),
+        reasoning_effort.trim().to_ascii_lowercase(),
+    )
 }
 
 pub fn is_valid_artifact_kind(kind: &str) -> bool {
@@ -734,7 +793,9 @@ mod tests {
             skill: SKILL_ADVERSARIAL_REVIEW.to_string(),
             lineage: "anthropic".to_string(),
             champion_model: "custom-sonnet".to_string(),
+            champion_reasoning_effort: String::new(),
             backup_model: "custom-haiku".to_string(),
+            backup_reasoning_effort: String::new(),
             sort_order: 0,
             enabled: true,
             updated_at: Utc::now(),

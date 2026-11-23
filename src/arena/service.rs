@@ -13,6 +13,7 @@ use crate::arena::types::{
     VALID_CANDIDATE_SEVERITIES, VALID_LEG_ROLES, VALID_LEG_STATUSES, VALID_PHASES,
     VALID_TASK_KINDS, VALID_WINNING_ROLES, classify_size_bucket, derive_candidate_keys,
     infer_lineage, is_trial_competing_role, is_valid_artifact_kind, is_valid_skill,
+    model_effort_key, normalize_reasoning_effort,
 };
 use crate::auth::random_hex_secret;
 use crate::routes::ApiError;
@@ -51,7 +52,8 @@ pub async fn list_roster(
     }
 
     sqlx::query_as::<_, RosterEntry>(
-        "SELECT skill, lineage, champion_model, backup_model, sort_order, enabled, updated_at
+        "SELECT skill, lineage, champion_model, champion_reasoning_effort,
+                backup_model, backup_reasoning_effort, sort_order, enabled, updated_at
          FROM arena_roster
          WHERE user_id = $1 AND ($2 = '' OR skill = $2)
          ORDER BY skill ASC, sort_order ASC, lineage ASC",
@@ -71,6 +73,7 @@ struct OpenTrialSlotRow {
     id: i64,
     lineage: String,
     champion_model: String,
+    champion_reasoning_effort: String,
 }
 
 pub async fn replace_roster(
@@ -90,7 +93,12 @@ pub async fn replace_roster(
     for slot in &mut slots {
         slot.lineage = slot.lineage.trim().to_ascii_lowercase();
         slot.champion_model = slot.champion_model.trim().to_string();
+        slot.champion_reasoning_effort =
+            normalize_reasoning_effort(&slot.champion_reasoning_effort)
+                .map_err(ApiError::bad_request)?;
         slot.backup_model = slot.backup_model.trim().to_string();
+        slot.backup_reasoning_effort = normalize_reasoning_effort(&slot.backup_reasoning_effort)
+            .map_err(ApiError::bad_request)?;
         if slot.lineage.is_empty() || slot.champion_model.is_empty() {
             return Err(ApiError::bad_request(
                 "lineage and championModel must be non-empty",
@@ -115,7 +123,7 @@ pub async fn replace_roster(
     lock_user_row(&mut tx, user_id).await?;
 
     let open_trials = sqlx::query_as::<_, OpenTrialSlotRow>(
-        "SELECT id, lineage, champion_model
+        "SELECT id, lineage, champion_model, champion_reasoning_effort
          FROM arena_trials
          WHERE user_id = $1 AND skill = $2 AND status IN ('active', 'completed')
          FOR UPDATE",
@@ -137,9 +145,10 @@ pub async fn replace_roster(
             )));
         };
         if !next_slot.enabled
-            || !next_slot
-                .champion_model
-                .eq_ignore_ascii_case(&trial.champion_model)
+            || model_effort_key(
+                &next_slot.champion_model,
+                &next_slot.champion_reasoning_effort,
+            ) != model_effort_key(&trial.champion_model, &trial.champion_reasoning_effort)
         {
             return Err(ApiError::conflict(format!(
                 "open trial #{} exists for {} / {} (champion {}); promote or retire it before changing or disabling that slot",
@@ -160,14 +169,19 @@ pub async fn replace_roster(
 
     for slot in &slots {
         sqlx::query(
-            "INSERT INTO arena_roster (user_id, skill, lineage, champion_model, backup_model, sort_order, enabled, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())",
+            "INSERT INTO arena_roster (
+                user_id, skill, lineage, champion_model, champion_reasoning_effort,
+                backup_model, backup_reasoning_effort, sort_order, enabled, updated_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())",
         )
         .bind(user_id)
         .bind(skill)
         .bind(&slot.lineage)
         .bind(&slot.champion_model)
+        .bind(&slot.champion_reasoning_effort)
         .bind(&slot.backup_model)
+        .bind(&slot.backup_reasoning_effort)
         .bind(slot.sort_order)
         .bind(slot.enabled)
         .execute(&mut *tx)
@@ -189,6 +203,7 @@ pub async fn replace_roster(
 #[derive(sqlx::FromRow)]
 struct ChampionSlotRow {
     champion_model: String,
+    champion_reasoning_effort: String,
     enabled: bool,
 }
 
@@ -198,7 +213,9 @@ pub(crate) struct TrialRow {
     pub skill: String,
     pub lineage: String,
     pub champion_model: String,
+    pub champion_reasoning_effort: String,
     pub challenger_model: String,
+    pub challenger_reasoning_effort: String,
     pub target_runs: i32,
     pub completed_runs: i32,
     pub swap_percent: i32,
@@ -215,7 +232,9 @@ impl From<TrialRow> for Trial {
             skill: r.skill,
             lineage: r.lineage,
             champion_model: r.champion_model,
+            champion_reasoning_effort: r.champion_reasoning_effort,
             challenger_model: r.challenger_model,
+            challenger_reasoning_effort: r.challenger_reasoning_effort,
             target_runs: r.target_runs,
             completed_runs: r.completed_runs,
             swap_percent: r.swap_percent,
@@ -243,6 +262,8 @@ pub async fn start_trial(
             "lineage and challengerModel are required",
         ));
     }
+    let challenger_effort = normalize_reasoning_effort(&input.challenger_reasoning_effort)
+        .map_err(ApiError::bad_request)?;
     if !(1..=500).contains(&input.target_runs) {
         return Err(ApiError::bad_request(
             "targetRuns must be between 1 and 500",
@@ -263,7 +284,7 @@ pub async fn start_trial(
     lock_user_row(&mut tx, user_id).await?;
 
     let champ = sqlx::query_as::<_, ChampionSlotRow>(
-        "SELECT champion_model, enabled
+        "SELECT champion_model, champion_reasoning_effort, enabled
          FROM arena_roster
          WHERE user_id = $1 AND skill = $2 AND lineage = $3",
     )
@@ -287,20 +308,24 @@ pub async fn start_trial(
             "roster lineage {lineage} is disabled for {skill}"
         )));
     }
-    if champ.champion_model.eq_ignore_ascii_case(challenger) {
+    if model_effort_key(&champ.champion_model, &champ.champion_reasoning_effort)
+        == model_effort_key(challenger, &challenger_effort)
+    {
         return Err(ApiError::bad_request(format!(
-            "challenger {challenger:?} is already the champion"
+            "challenger {challenger:?} (effort {challenger_effort:?}) is already the champion"
         )));
     }
 
     let row = sqlx::query_as::<_, TrialRow>(
         "INSERT INTO arena_trials (
-            user_id, skill, lineage, champion_model, challenger_model,
+            user_id, skill, lineage, champion_model, champion_reasoning_effort,
+            challenger_model, challenger_reasoning_effort,
             target_runs, swap_percent, allow_pr_diff
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING
-            id, skill, lineage, champion_model, challenger_model,
+            id, skill, lineage, champion_model, champion_reasoning_effort,
+            challenger_model, challenger_reasoning_effort,
             target_runs, 0::INT AS completed_runs, swap_percent, allow_pr_diff,
             status, created_at, decided_at",
     )
@@ -308,7 +333,9 @@ pub async fn start_trial(
     .bind(skill)
     .bind(&lineage)
     .bind(&champ.champion_model)
+    .bind(&champ.champion_reasoning_effort)
     .bind(challenger)
+    .bind(&challenger_effort)
     .bind(input.target_runs)
     .bind(swap_pct)
     .bind(input.allow_pr_diff)
@@ -348,7 +375,8 @@ pub async fn list_trials(
 
     let rows = sqlx::query_as::<_, TrialRow>(
         "SELECT
-            t.id, t.skill, t.lineage, t.champion_model, t.challenger_model,
+            t.id, t.skill, t.lineage, t.champion_model, t.champion_reasoning_effort,
+            t.challenger_model, t.challenger_reasoning_effort,
             t.target_runs, t.swap_percent, t.allow_pr_diff, t.status, t.created_at, t.decided_at,
             COALESCE((
                 SELECT COUNT(DISTINCT l.run_id)::INT
@@ -360,6 +388,7 @@ pub async fn list_trials(
                   AND l.lineage = t.lineage
                   AND l.is_challenger = TRUE
                   AND lower(l.model) = lower(t.challenger_model)
+                  AND l.reasoning_effort = t.challenger_reasoning_effort
                   AND (
                       (t.skill = 'adversarial-review' AND l.role = 'reviewer')
                       OR (t.skill = 'plan-tournament' AND l.role IN ('minimal_diff', 'clean_architecture', 'edge_cases'))
@@ -402,13 +431,14 @@ pub(crate) async fn count_trial_challenger_runs(
            AND l.lineage = $4
            AND l.is_challenger = TRUE
            AND lower(l.model) = lower($5)
+           AND l.reasoning_effort = $6
            AND (
                ($3 = 'adversarial-review' AND l.role = 'reviewer')
                OR ($3 = 'plan-tournament' AND l.role IN ('minimal_diff', 'clean_architecture', 'edge_cases'))
            )
-           AND ($6 = TRUE OR r.artifact_kind <> 'pr_diff')
-           AND r.occurred_at >= $7
-           AND ($8::timestamptz IS NULL OR r.occurred_at <= $8)
+           AND ($7 = TRUE OR r.artifact_kind <> 'pr_diff')
+           AND r.occurred_at >= $8
+           AND ($9::timestamptz IS NULL OR r.occurred_at <= $9)
            AND l.status IN ('ok', 'retried')",
     )
     .bind(trial.id)
@@ -416,6 +446,7 @@ pub(crate) async fn count_trial_challenger_runs(
     .bind(&trial.skill)
     .bind(&trial.lineage)
     .bind(&trial.challenger_model)
+    .bind(&trial.challenger_reasoning_effort)
     .bind(trial.allow_pr_diff)
     .bind(trial.created_at)
     .bind(trial.decided_at)
@@ -447,7 +478,8 @@ pub async fn decide_trial(
 
     let mut trial = sqlx::query_as::<_, TrialRow>(
         "SELECT
-            id, skill, lineage, champion_model, challenger_model,
+            id, skill, lineage, champion_model, champion_reasoning_effort,
+            challenger_model, challenger_reasoning_effort,
             target_runs, 0::INT AS completed_runs, swap_percent, allow_pr_diff,
             status, created_at, decided_at
          FROM arena_trials
@@ -475,16 +507,21 @@ pub async fn decide_trial(
         let updated = sqlx::query(
             "UPDATE arena_roster
              SET backup_model = champion_model,
+                 backup_reasoning_effort = champion_reasoning_effort,
                  champion_model = $4,
+                 champion_reasoning_effort = $5,
                  updated_at = NOW()
              WHERE user_id = $1 AND skill = $2 AND lineage = $3
-               AND lower(champion_model) = lower($5)",
+               AND lower(champion_model) = lower($6)
+               AND champion_reasoning_effort = $7",
         )
         .bind(user_id)
         .bind(&trial.skill)
         .bind(&trial.lineage)
         .bind(&trial.challenger_model)
+        .bind(&trial.challenger_reasoning_effort)
         .bind(&trial.champion_model)
+        .bind(&trial.champion_reasoning_effort)
         .execute(&mut *tx)
         .await
         .map_err(|err| {
@@ -536,6 +573,7 @@ struct ActiveTrialRow {
     id: i64,
     lineage: String,
     challenger_model: String,
+    challenger_reasoning_effort: String,
     swap_percent: i32,
     allow_pr_diff: bool,
     eligible_dispatches: i32,
@@ -545,6 +583,7 @@ struct ActiveTrialRow {
 struct ActiveTrialState {
     id: i64,
     challenger: String,
+    challenger_effort: String,
     swap_pct: i32,
     allow_pr: bool,
     counter: i32,
@@ -557,12 +596,22 @@ async fn resolve_trial_model(
     entry: &RosterEntry,
     role: &str,
     artifact_kind: &str,
-) -> Result<(String, bool, Option<i64>), ApiError> {
+) -> Result<(String, String, bool, Option<i64>), ApiError> {
     let Some(at) = trials_by_lineage.get_mut(&entry.lineage) else {
-        return Ok((entry.champion_model.clone(), false, None));
+        return Ok((
+            entry.champion_model.clone(),
+            entry.champion_reasoning_effort.clone(),
+            false,
+            None,
+        ));
     };
     if artifact_kind == "pr_diff" && !at.allow_pr {
-        return Ok((entry.champion_model.clone(), false, None));
+        return Ok((
+            entry.champion_model.clone(),
+            entry.champion_reasoning_effort.clone(),
+            false,
+            None,
+        ));
     }
 
     let prev_role_count = match at.role_counters.get(role).copied() {
@@ -592,9 +641,19 @@ async fn resolve_trial_model(
     })?;
 
     if swap {
-        Ok((at.challenger.clone(), true, Some(at.id)))
+        Ok((
+            at.challenger.clone(),
+            at.challenger_effort.clone(),
+            true,
+            Some(at.id),
+        ))
     } else {
-        Ok((entry.champion_model.clone(), false, None))
+        Ok((
+            entry.champion_model.clone(),
+            entry.champion_reasoning_effort.clone(),
+            false,
+            None,
+        ))
     }
 }
 
@@ -629,7 +688,8 @@ pub async fn select_panel(
     lock_user_row(&mut tx, user_id).await?;
 
     let roster = sqlx::query_as::<_, RosterEntry>(
-        "SELECT skill, lineage, champion_model, backup_model, sort_order, enabled, updated_at
+        "SELECT skill, lineage, champion_model, champion_reasoning_effort,
+                backup_model, backup_reasoning_effort, sort_order, enabled, updated_at
          FROM arena_roster
          WHERE user_id = $1 AND skill = $2 AND enabled = TRUE
          ORDER BY sort_order ASC, lineage ASC",
@@ -671,7 +731,8 @@ pub async fn select_panel(
     }
 
     let trial_rows = sqlx::query_as::<_, ActiveTrialRow>(
-        "SELECT id, lineage, challenger_model, swap_percent, allow_pr_diff, eligible_dispatches, lens_counters
+        "SELECT id, lineage, challenger_model, challenger_reasoning_effort, swap_percent,
+                allow_pr_diff, eligible_dispatches, lens_counters
          FROM arena_trials
          WHERE user_id = $1 AND skill = $2 AND status = 'active'
          FOR UPDATE",
@@ -692,6 +753,7 @@ pub async fn select_panel(
             ActiveTrialState {
                 id: row.id,
                 challenger: row.challenger_model,
+                challenger_effort: row.challenger_reasoning_effort,
                 swap_pct: row.swap_percent,
                 allow_pr: row.allow_pr_diff,
                 counter: row.eligible_dispatches,
@@ -711,7 +773,7 @@ pub async fn select_panel(
             .collect();
 
         for (i, entry) in eligible.into_iter().enumerate() {
-            let (model, is_challenger, trial_id) = resolve_trial_model(
+            let (model, reasoning_effort, is_challenger, trial_id) = resolve_trial_model(
                 &mut tx,
                 &mut trials_by_lineage,
                 entry,
@@ -724,7 +786,9 @@ pub async fn select_panel(
                 role: "reviewer".to_string(),
                 lineage: entry.lineage.clone(),
                 model,
+                reasoning_effort,
                 backup_model: entry.backup_model.clone(),
+                backup_reasoning_effort: entry.backup_reasoning_effort.clone(),
                 is_challenger,
                 trial_id,
             });
@@ -751,7 +815,7 @@ pub async fn select_panel(
         let n = roster.len();
         for (i, lens) in TOURNAMENT_LENSES.iter().enumerate() {
             let entry = &roster[((turn as usize) + i) % n];
-            let (model, is_challenger, trial_id) =
+            let (model, reasoning_effort, is_challenger, trial_id) =
                 resolve_trial_model(&mut tx, &mut trials_by_lineage, entry, lens, artifact_kind)
                     .await?;
             if !out.critic_order.contains(&model) {
@@ -762,7 +826,9 @@ pub async fn select_panel(
                 role: (*lens).to_string(),
                 lineage: entry.lineage.clone(),
                 model,
+                reasoning_effort,
                 backup_model: entry.backup_model.clone(),
+                backup_reasoning_effort: entry.backup_reasoning_effort.clone(),
                 is_challenger,
                 trial_id,
             });
@@ -840,6 +906,8 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
     input.artifact_ref = input.artifact_ref.trim().to_string();
     input.repo = input.repo.trim().to_string();
     input.host_model = input.host_model.trim().to_string();
+    input.host_reasoning_effort =
+        normalize_reasoning_effort(&input.host_reasoning_effort).map_err(ApiError::bad_request)?;
     input.host_lineage = input.host_lineage.trim().to_ascii_lowercase();
     input.harness = input.harness.trim().to_string();
     input.machine = input.machine.trim().to_string();
@@ -854,6 +922,8 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
     for leg in &mut input.legs {
         leg.role = leg.role.trim().to_string();
         leg.model = leg.model.trim().to_string();
+        leg.reasoning_effort =
+            normalize_reasoning_effort(&leg.reasoning_effort).map_err(ApiError::bad_request)?;
         leg.lineage = leg.lineage.trim().to_ascii_lowercase();
         leg.status = leg.status.trim().to_string();
         if leg.status.is_empty() {
@@ -924,12 +994,21 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
         ));
     }
 
-    let mut reviewer_models = HashSet::new();
+    let mut reviewer_models: HashMap<String, String> = HashMap::new();
     let mut has_ponytail_leg = false;
     for leg in &input.legs {
         match leg.role.as_str() {
             "reviewer" => {
-                reviewer_models.insert(leg.model.to_ascii_lowercase());
+                let lower = leg.model.to_ascii_lowercase();
+                if let Some(prev_effort) = reviewer_models.get(&lower)
+                    && prev_effort != &leg.reasoning_effort
+                {
+                    return Err(ApiError::bad_request(format!(
+                        "ambiguous reviewer legs for model {:?}: conflicting reasoningEffort {:?} vs {:?}",
+                        leg.model, prev_effort, leg.reasoning_effort
+                    )));
+                }
+                reviewer_models.insert(lower, leg.reasoning_effort.clone());
             }
             "ponytail" => {
                 has_ponytail_leg = true;
@@ -973,7 +1052,7 @@ pub fn validate_and_normalize_record_run_input(input: &mut RecordRunInput) -> Re
                         "candidate {idx} proposer {trimmed:?} requires a ponytail leg in legs"
                     )));
                 }
-            } else if !reviewer_models.contains(&lower) {
+            } else if !reviewer_models.contains_key(&lower) {
                 return Err(ApiError::bad_request(format!(
                     "candidate {idx} proposer {trimmed:?} does not match any reviewer leg in legs"
                 )));
@@ -1012,6 +1091,7 @@ struct PreservedLegTrialRow {
     role: String,
     lineage: String,
     model: String,
+    reasoning_effort: String,
     is_challenger: bool,
     trial_id: i64,
 }
@@ -1022,7 +1102,9 @@ struct TrialLookupRow {
     skill: String,
     lineage: String,
     champion_model: String,
+    champion_reasoning_effort: String,
     challenger_model: String,
+    challenger_reasoning_effort: String,
     allow_pr_diff: bool,
     created_at: DateTime<Utc>,
     decided_at: Option<DateTime<Utc>>,
@@ -1043,7 +1125,8 @@ pub async fn record_run(
     lock_user_row(&mut tx, user_id).await?;
 
     let roster = sqlx::query_as::<_, RosterEntry>(
-        "SELECT skill, lineage, champion_model, backup_model, sort_order, enabled, updated_at
+        "SELECT skill, lineage, champion_model, champion_reasoning_effort,
+                backup_model, backup_reasoning_effort, sort_order, enabled, updated_at
          FROM arena_roster
          WHERE user_id = $1",
     )
@@ -1108,10 +1191,10 @@ pub async fn record_run(
     let run_id: i64 = sqlx::query_scalar(
         "INSERT INTO arena_runs (
             user_id, run_key, skill, artifact_kind, artifact_ref, repo, phase,
-            host_model, host_lineage, harness, machine,
+            host_model, host_reasoning_effort, host_lineage, harness, machine,
             approach_verdict, winning_role, occurred_at, client_sent_at, recorded_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15, NOW()), NOW())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, COALESCE($16, NOW()), NOW())
          ON CONFLICT (user_id, run_key) DO UPDATE SET
             skill = EXCLUDED.skill,
             artifact_kind = EXCLUDED.artifact_kind,
@@ -1119,13 +1202,14 @@ pub async fn record_run(
             repo = EXCLUDED.repo,
             phase = EXCLUDED.phase,
             host_model = EXCLUDED.host_model,
+            host_reasoning_effort = EXCLUDED.host_reasoning_effort,
             host_lineage = EXCLUDED.host_lineage,
             harness = EXCLUDED.harness,
             machine = EXCLUDED.machine,
             approach_verdict = EXCLUDED.approach_verdict,
             winning_role = EXCLUDED.winning_role,
             occurred_at = EXCLUDED.occurred_at,
-            client_sent_at = COALESCE($15, NOW()),
+            client_sent_at = COALESCE($16, NOW()),
             recorded_at = NOW()
          RETURNING id",
     )
@@ -1137,6 +1221,7 @@ pub async fn record_run(
     .bind(&input.repo)
     .bind(&input.phase)
     .bind(&input.host_model)
+    .bind(&input.host_reasoning_effort)
     .bind(&input.host_lineage)
     .bind(&input.harness)
     .bind(&input.machine)
@@ -1153,7 +1238,8 @@ pub async fn record_run(
 
     let open_trials = sqlx::query_as::<_, TrialRow>(
         "SELECT
-            id, skill, lineage, champion_model, challenger_model,
+            id, skill, lineage, champion_model, champion_reasoning_effort,
+            challenger_model, challenger_reasoning_effort,
             target_runs, 0::INT AS completed_runs, swap_percent, allow_pr_diff,
             status, created_at, decided_at
          FROM arena_trials
@@ -1178,7 +1264,7 @@ pub async fn record_run(
     }
 
     let preserved_rows = sqlx::query_as::<_, PreservedLegTrialRow>(
-        "SELECT slot_index, role, lineage, model, is_challenger, trial_id
+        "SELECT slot_index, role, lineage, model, reasoning_effort, is_challenger, trial_id
          FROM arena_run_legs
          WHERE run_id = $1 AND trial_id IS NOT NULL",
     )
@@ -1210,7 +1296,8 @@ pub async fn record_run(
                 return Err(ApiError::bad_request("leg trialId must be > 0"));
             }
             let t = sqlx::query_as::<_, TrialLookupRow>(
-                "SELECT id, skill, lineage, champion_model, challenger_model,
+                "SELECT id, skill, lineage, champion_model, champion_reasoning_effort,
+                        challenger_model, challenger_reasoning_effort,
                         allow_pr_diff, created_at, decided_at
                  FROM arena_trials
                  WHERE id = $1 AND user_id = $2",
@@ -1263,14 +1350,21 @@ pub async fn record_run(
                     t.id
                 )));
             }
-            if leg.model.eq_ignore_ascii_case(&t.challenger_model) {
+            let leg_key = model_effort_key(&leg.model, &leg.reasoning_effort);
+            if leg_key == model_effort_key(&t.challenger_model, &t.challenger_reasoning_effort) {
                 leg.is_challenger = true;
-            } else if leg.model.eq_ignore_ascii_case(&t.champion_model) {
+            } else if leg_key == model_effort_key(&t.champion_model, &t.champion_reasoning_effort) {
                 leg.is_challenger = false;
             } else {
                 return Err(ApiError::bad_request(format!(
-                    "leg model {:?} does not match champion {:?} or challenger {:?} on trial {}",
-                    leg.model, t.champion_model, t.challenger_model, t.id
+                    "leg model {:?} (effort {:?}) does not match champion {:?} ({:?}) or challenger {:?} ({:?}) on trial {}",
+                    leg.model,
+                    leg.reasoning_effort,
+                    t.champion_model,
+                    t.champion_reasoning_effort,
+                    t.challenger_model,
+                    t.challenger_reasoning_effort,
+                    t.id
                 )));
             }
         } else {
@@ -1279,7 +1373,8 @@ pub async fn record_run(
                 if let Some(prev) = preserved_by_slot.get(&leg.slot_index)
                     && prev.role == leg.role
                     && prev.lineage == leg.lineage
-                    && prev.model.eq_ignore_ascii_case(&leg.model)
+                    && model_effort_key(&prev.model, &prev.reasoning_effort)
+                        == model_effort_key(&leg.model, &leg.reasoning_effort)
                 {
                     leg.trial_id = Some(prev.trial_id);
                     leg.is_challenger = prev.is_challenger;
@@ -1289,10 +1384,15 @@ pub async fn record_run(
                     && (t.allow_pr_diff || input.artifact_kind != "pr_diff")
                     && occurred_at >= t.created_at
                 {
-                    if leg.model.eq_ignore_ascii_case(&t.challenger_model) {
+                    let leg_key = model_effort_key(&leg.model, &leg.reasoning_effort);
+                    if leg_key
+                        == model_effort_key(&t.challenger_model, &t.challenger_reasoning_effort)
+                    {
                         leg.trial_id = Some(t.id);
                         leg.is_challenger = true;
-                    } else if leg.model.eq_ignore_ascii_case(&t.champion_model) {
+                    } else if leg_key
+                        == model_effort_key(&t.champion_model, &t.champion_reasoning_effort)
+                    {
                         leg.trial_id = Some(t.id);
                         leg.is_challenger = false;
                     }
@@ -1302,17 +1402,18 @@ pub async fn record_run(
 
         sqlx::query(
             "INSERT INTO arena_run_legs (
-                run_id, slot_index, role, lineage, model, is_challenger, trial_id,
+                run_id, slot_index, role, lineage, model, reasoning_effort, is_challenger, trial_id,
                 status, duration_ms, won_core_plan, cherry_picks_count,
                 critic_adopted_count, critic_bloat_dropped_count
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
         .bind(run_id)
         .bind(leg.slot_index)
         .bind(&leg.role)
         .bind(&leg.lineage)
         .bind(&leg.model)
+        .bind(&leg.reasoning_effort)
         .bind(leg.is_challenger)
         .bind(leg.trial_id)
         .bind(&leg.status)
@@ -1499,6 +1600,9 @@ pub fn validate_and_normalize_coding_run_input(
         ));
     }
 
+    input.reasoning_effort =
+        normalize_reasoning_effort(&input.reasoning_effort).map_err(ApiError::bad_request)?;
+
     input.lineage = input.lineage.trim().to_ascii_lowercase();
     if input.lineage.len() > 128 {
         return Err(ApiError::bad_request(
@@ -1601,7 +1705,8 @@ pub async fn record_coding_run(
 
     if input.lineage.is_empty() {
         let roster: Vec<RosterEntry> = sqlx::query_as(
-            "SELECT skill, lineage, champion_model, backup_model, sort_order, enabled, updated_at
+            "SELECT skill, lineage, champion_model, champion_reasoning_effort,
+                    backup_model, backup_reasoning_effort, sort_order, enabled, updated_at
              FROM arena_roster
              WHERE user_id = $1",
         )
@@ -1617,22 +1722,23 @@ pub async fn record_coding_run(
 
     let upserted: Option<(i64, String)> = sqlx::query_as(
         "INSERT INTO arena_coding_runs (
-            user_id, run_key, model, lineage, harness, repo, pr_number, issue_ref,
+            user_id, run_key, model, reasoning_effort, lineage, harness, repo, pr_number, issue_ref,
             task_kind, loc_added, loc_deleted, size_bucket, files_changed, tests_delta,
             prompt_turn_count, red_ci_pushes, ccr_rounds, ccr_actionable_count, ccr_noise_count,
             human_threads_count, escaped_regression, merged_without_followup_24h, first_pass_clean,
             abandoned, time_to_green_sec, time_to_merge_sec, digest_summary,
             occurred_at, client_sent_at, recorded_at
          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8,
-            $9, $10, $11, $12, $13, $14,
-            $15, $16, $17, $18, $19,
-            $20, $21, $22, $23,
-            $24, $25, $26, $27,
-            COALESCE($28, NOW()), COALESCE($29, NOW()), NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10, $11, $12, $13, $14, $15,
+            $16, $17, $18, $19, $20,
+            $21, $22, $23, $24,
+            $25, $26, $27, $28,
+            COALESCE($29, NOW()), COALESCE($30, NOW()), NOW()
          )
          ON CONFLICT (user_id, run_key) DO UPDATE SET
             model = EXCLUDED.model,
+            reasoning_effort = EXCLUDED.reasoning_effort,
             lineage = EXCLUDED.lineage,
             harness = EXCLUDED.harness,
             repo = EXCLUDED.repo,
@@ -1657,17 +1763,18 @@ pub async fn record_coding_run(
             time_to_green_sec = EXCLUDED.time_to_green_sec,
             time_to_merge_sec = EXCLUDED.time_to_merge_sec,
             digest_summary = EXCLUDED.digest_summary,
-            occurred_at = COALESCE($28, arena_coding_runs.occurred_at),
-            client_sent_at = COALESCE($29, NOW()),
+            occurred_at = COALESCE($29, arena_coding_runs.occurred_at),
+            client_sent_at = COALESCE($30, NOW()),
             recorded_at = NOW()
          WHERE arena_coding_runs.client_sent_at IS NULL
-            OR $29 IS NULL
-            OR $29 >= arena_coding_runs.client_sent_at
+            OR $30 IS NULL
+            OR $30 >= arena_coding_runs.client_sent_at
          RETURNING id, size_bucket",
     )
     .bind(user_id)
     .bind(&input.run_key)
     .bind(&input.model)
+    .bind(&input.reasoning_effort)
     .bind(&input.lineage)
     .bind(&input.harness)
     .bind(&input.repo)
