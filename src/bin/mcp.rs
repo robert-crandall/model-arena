@@ -10,7 +10,8 @@ use app::apiclient::{APP_SLUG, ApiClient, ClientConfig, mint_token_via_login};
 use app::arena::{
     BackfillArgs, CodingLeaderboardQuery, CodingRunInput, LeaderboardQuery, OverrideCandidateInput,
     OverrideCodingRunInput, RecordRunInput, RosterSlotInput, SelectPanelInput, SpoolScope,
-    StartTrialInput, flush_spool, run_backfill, submit_or_spool_coding_run, submit_or_spool_run,
+    StartTrialInput, StringEnum, VALID_HUMAN_OVERRIDES, VALID_SKILLS, VALID_TRIAL_DECISIONS,
+    flush_spool, run_backfill, submit_or_spool_coding_run, submit_or_spool_run,
 };
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -24,6 +25,7 @@ use serde::{Deserialize, Serialize};
 struct ListRosterArgs {
     /// Optional filter: adversarial-review or plan-tournament.
     #[serde(default)]
+    #[schemars(transform = StringEnum::new(&VALID_SKILLS))]
     skill: Option<String>,
 }
 
@@ -31,6 +33,7 @@ struct ListRosterArgs {
 #[serde(rename_all = "camelCase")]
 struct SetRosterArgs {
     /// Skill whose roster is replaced: adversarial-review or plan-tournament.
+    #[schemars(transform = StringEnum::new(&VALID_SKILLS))]
     pub skill: String,
     /// Ordered lineage slots for this skill.
     #[serde(default)]
@@ -43,6 +46,7 @@ struct DecideTrialArgs {
     /// Trial ID to resolve.
     pub trial_id: i64,
     /// Decision: promote or retire.
+    #[schemars(transform = StringEnum::new(&VALID_TRIAL_DECISIONS))]
     pub decision: String,
 }
 
@@ -52,6 +56,7 @@ struct OverrideCandidateArgs {
     /// Candidate ID to confirm or overturn.
     pub candidate_id: i64,
     /// Override value: confirmed, overturned, or clear.
+    #[schemars(transform = StringEnum::new(&VALID_HUMAN_OVERRIDES))]
     pub human_override: String,
     /// Optional note explaining why the verdict was overridden.
     #[serde(default)]
@@ -64,6 +69,7 @@ struct OverrideCodingRunArgs {
     /// Coding run ID to confirm or overturn.
     pub coding_run_id: i64,
     /// Override value: confirmed, overturned, or clear.
+    #[schemars(transform = StringEnum::new(&VALID_HUMAN_OVERRIDES))]
     pub human_override: String,
     /// Optional note explaining why the coding run outcome was overridden.
     #[serde(default)]
@@ -703,4 +709,246 @@ fn prompt_line(prompt: &str) -> Result<String, String> {
         .read_line(&mut line)
         .map_err(|err| format!("failed to read input: {err}"))?;
     Ok(line)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    fn tool_schema(name: &str) -> Value {
+        let tool = AppMcp::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("tool {name} not registered"));
+        serde_json::to_value(&*tool.input_schema).expect("serialize tool input schema")
+    }
+
+    fn assert_no_refs_or_defs(val: &Value, path: &str) {
+        if let Some(obj) = val.as_object() {
+            assert!(
+                !obj.contains_key("$ref"),
+                "unexpected $ref at {path}: {val}"
+            );
+            assert!(
+                !obj.contains_key("$defs"),
+                "unexpected $defs at {path}: {val}"
+            );
+            for (k, v) in obj {
+                assert_no_refs_or_defs(v, &format!("{path}.{k}"));
+            }
+        } else if let Some(arr) = val.as_array() {
+            for (idx, v) in arr.iter().enumerate() {
+                assert_no_refs_or_defs(v, &format!("{path}[{idx}]"));
+            }
+        }
+    }
+
+    fn assert_defaults_within_enums(val: &Value, path: &str) {
+        if let Some(obj) = val.as_object() {
+            if let (Some(allowed), Some(default)) = (
+                obj.get("enum").and_then(Value::as_array),
+                obj.get("default"),
+            ) {
+                assert!(
+                    allowed.contains(default),
+                    "default {default} is not in enum {allowed:?} at {path}"
+                );
+            }
+            for (k, v) in obj {
+                assert_defaults_within_enums(v, &format!("{path}.{k}"));
+            }
+        } else if let Some(arr) = val.as_array() {
+            for (idx, v) in arr.iter().enumerate() {
+                assert_defaults_within_enums(v, &format!("{path}[{idx}]"));
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_tool_schemas_inline_nested_types_and_keep_defaults_valid() {
+        for tool in AppMcp::tool_router().list_all() {
+            let schema = serde_json::to_value(&*tool.input_schema).expect("serialize schema");
+            assert_no_refs_or_defs(&schema, &tool.name);
+            assert_defaults_within_enums(&schema, &tool.name);
+        }
+    }
+
+    #[test]
+    fn record_run_schema_exposes_top_level_and_inline_nested_enums() {
+        let schema = tool_schema("record_run");
+        assert_eq!(
+            schema.pointer("/properties/skill/enum"),
+            Some(&json!(["adversarial-review", "plan-tournament"]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/artifactKind/enum"),
+            Some(&json!(["pr_diff", "plan", "patch", "branch_diff", "other"]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/artifactKind/default"),
+            Some(&json!("other"))
+        );
+        assert_eq!(
+            schema.pointer("/properties/phase/enum"),
+            Some(&json!(["independent", "targeted", "follow_up"]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/phase/default"),
+            Some(&json!("independent"))
+        );
+        assert_eq!(
+            schema.pointer("/properties/approachVerdict/enum"),
+            Some(&json!([
+                "",
+                "keep",
+                "adjust",
+                "rethink",
+                "insufficient_evidence"
+            ]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/approachVerdict/default"),
+            Some(&json!(""))
+        );
+        assert_eq!(
+            schema.pointer("/properties/winningRole/enum"),
+            Some(&json!([
+                "",
+                "minimal_diff",
+                "clean_architecture",
+                "edge_cases"
+            ]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/winningRole/default"),
+            Some(&json!(""))
+        );
+
+        assert_eq!(
+            schema.pointer("/properties/legs/items/properties/role/enum"),
+            Some(&json!([
+                "reviewer",
+                "ponytail",
+                "explore_scout",
+                "minimal_diff",
+                "clean_architecture",
+                "edge_cases",
+                "critic"
+            ]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/legs/items/properties/status/enum"),
+            Some(&json!(["ok", "retried", "fallback", "timeout", "skipped"]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/legs/items/properties/status/default"),
+            Some(&json!("ok"))
+        );
+        assert_eq!(
+            schema.pointer("/properties/candidates/items/properties/severity/enum"),
+            Some(&json!(["blocking", "important", "minor"]))
+        );
+        assert_eq!(
+            schema.pointer("/properties/candidates/items/properties/severity/default"),
+            Some(&json!("important"))
+        );
+        assert_eq!(
+            schema.pointer("/properties/candidates/items/properties/disposition/enum"),
+            Some(&json!(["adopted", "set_aside", "open_question"]))
+        );
+    }
+
+    #[test]
+    fn nullable_and_auxiliary_mcp_tools_expose_expected_enums() {
+        let select_panel = tool_schema("select_panel");
+        assert_eq!(
+            select_panel.pointer("/properties/skill/enum"),
+            Some(&json!(["adversarial-review", "plan-tournament"]))
+        );
+        assert_eq!(
+            select_panel.pointer("/properties/artifactKind/enum"),
+            Some(&json!([
+                "pr_diff",
+                "plan",
+                "patch",
+                "branch_diff",
+                "other",
+                null
+            ]))
+        );
+
+        let leaderboard = tool_schema("get_leaderboard");
+        assert_eq!(
+            leaderboard.pointer("/properties/skill/enum"),
+            Some(&json!(["adversarial-review", "plan-tournament", null]))
+        );
+
+        let coding_lb = tool_schema("get_coding_leaderboard");
+        assert_eq!(
+            coding_lb.pointer("/properties/taskKind/enum"),
+            Some(&json!([
+                "feature", "bugfix", "refactor", "cleanup", "other", null
+            ]))
+        );
+        assert_eq!(
+            coding_lb.pointer("/properties/sizeBucket/enum"),
+            Some(&json!(["S", "M", "L", null]))
+        );
+
+        let list_roster = tool_schema("list_roster");
+        assert_eq!(
+            list_roster.pointer("/properties/skill/enum"),
+            Some(&json!(["adversarial-review", "plan-tournament", null]))
+        );
+
+        let set_roster = tool_schema("set_roster");
+        assert_eq!(
+            set_roster.pointer("/properties/skill/enum"),
+            Some(&json!(["adversarial-review", "plan-tournament"]))
+        );
+        assert!(
+            set_roster
+                .pointer("/properties/slots/items/properties/championModel")
+                .is_some(),
+            "set_roster slots items should be inlined"
+        );
+
+        let start_trial = tool_schema("start_trial");
+        assert_eq!(
+            start_trial.pointer("/properties/skill/enum"),
+            Some(&json!(["adversarial-review", "plan-tournament"]))
+        );
+
+        let decide_trial = tool_schema("decide_trial");
+        assert_eq!(
+            decide_trial.pointer("/properties/decision/enum"),
+            Some(&json!(["promote", "retire"]))
+        );
+
+        let override_cand = tool_schema("override_candidate");
+        assert_eq!(
+            override_cand.pointer("/properties/humanOverride/enum"),
+            Some(&json!(["confirmed", "overturned", "clear"]))
+        );
+
+        let override_coding = tool_schema("override_coding_run");
+        assert_eq!(
+            override_coding.pointer("/properties/humanOverride/enum"),
+            Some(&json!(["confirmed", "overturned", "clear"]))
+        );
+
+        let record_coding = tool_schema("record_coding_run");
+        assert_eq!(
+            record_coding.pointer("/properties/taskKind/enum"),
+            Some(&json!([
+                "feature", "bugfix", "refactor", "cleanup", "other"
+            ]))
+        );
+        assert_eq!(
+            record_coding.pointer("/properties/taskKind/default"),
+            Some(&json!("feature"))
+        );
+    }
 }
