@@ -8,13 +8,17 @@ use utoipa::{IntoParams, ToSchema};
 
 pub const SKILL_ADVERSARIAL_REVIEW: &str = "adversarial-review";
 pub const SKILL_PLAN_TOURNAMENT: &str = "plan-tournament";
+pub const VALID_SKILLS: [&str; 2] = [SKILL_ADVERSARIAL_REVIEW, SKILL_PLAN_TOURNAMENT];
 
 pub const TOURNAMENT_LENSES: [&str; 3] = ["minimal_diff", "clean_architecture", "edge_cases"];
 
 pub const VALID_ARTIFACT_KINDS: [&str; 5] = ["pr_diff", "plan", "patch", "branch_diff", "other"];
 pub const VALID_PHASES: [&str; 3] = ["independent", "targeted", "follow_up"];
+pub const VALID_APPROACH_VERDICT_VALUES: [&str; 4] =
+    ["keep", "adjust", "rethink", "insufficient_evidence"];
 pub const VALID_APPROACH_VERDICTS: [&str; 5] =
     ["", "keep", "adjust", "rethink", "insufficient_evidence"];
+pub const VALID_WINNING_ROLE_VALUES: [&str; 3] = TOURNAMENT_LENSES;
 pub const VALID_WINNING_ROLES: [&str; 4] = ["", "minimal_diff", "clean_architecture", "edge_cases"];
 pub const VALID_LEG_ROLES: [&str; 7] = [
     "reviewer",
@@ -30,6 +34,59 @@ pub const VALID_CANDIDATE_SEVERITIES: [&str; 3] = ["blocking", "important", "min
 pub const VALID_CANDIDATE_DISPOSITIONS: [&str; 3] = ["adopted", "set_aside", "open_question"];
 pub const VALID_TASK_KINDS: [&str; 5] = ["feature", "bugfix", "refactor", "cleanup", "other"];
 pub const VALID_SIZE_BUCKETS: [&str; 3] = ["S", "M", "L"];
+pub const VALID_TRIAL_DECISIONS: [&str; 2] = ["promote", "retire"];
+pub const VALID_HUMAN_OVERRIDES: [&str; 3] = ["confirmed", "overturned", "clear"];
+
+/// Attaches a JSON Schema `enum` constraint derived from a single-source `VALID_*` constant.
+/// Appends `null` automatically for nullable (`Option<String>`) fields and reconciles `default`
+/// so empty-string serde defaults are never advertised outside the enum.
+#[derive(Clone, Copy)]
+pub struct StringEnum {
+    values: &'static [&'static str],
+    default: Option<&'static str>,
+}
+
+impl StringEnum {
+    pub const fn new(values: &'static [&'static str]) -> Self {
+        Self {
+            values,
+            default: None,
+        }
+    }
+
+    pub const fn with_default(values: &'static [&'static str], default: &'static str) -> Self {
+        Self {
+            values,
+            default: Some(default),
+        }
+    }
+}
+
+impl schemars::transform::Transform for StringEnum {
+    fn transform(&mut self, schema: &mut schemars::Schema) {
+        let nullable = schema
+            .get("type")
+            .and_then(|v| v.as_array())
+            .is_some_and(|arr| arr.iter().any(|t| t.as_str() == Some("null")));
+        let mut allowed: Vec<serde_json::Value> = self
+            .values
+            .iter()
+            .map(|v| serde_json::Value::String((*v).to_string()))
+            .collect();
+        if nullable {
+            allowed.push(serde_json::Value::Null);
+        }
+        schema.insert("enum".into(), serde_json::Value::Array(allowed));
+        if let Some(default) = self.default {
+            schema.insert(
+                "default".into(),
+                serde_json::Value::String(default.to_string()),
+            );
+        } else if schema.get("default").and_then(|v| v.as_str()) == Some("") {
+            schema.remove("default");
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, sqlx::FromRow, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +102,9 @@ pub struct RosterEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[schemars(inline)]
 pub struct RosterSlotInput {
+    /// Model lineage (for example: openai, anthropic, google).
     pub lineage: String,
     pub champion_model: String,
     #[serde(default)]
@@ -99,7 +158,10 @@ pub struct Trial {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StartTrialInput {
+    /// Skill for the bout: adversarial-review or plan-tournament.
+    #[schemars(transform = StringEnum::new(&VALID_SKILLS))]
     pub skill: String,
+    /// Roster lineage (for example: openai, anthropic, google).
     pub lineage: String,
     pub challenger_model: String,
     pub target_runs: i32,
@@ -112,14 +174,20 @@ pub struct StartTrialInput {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DecideTrialInput {
+    /// Decision: promote or retire.
+    #[schemars(transform = StringEnum::new(&VALID_TRIAL_DECISIONS))]
     pub decision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectPanelInput {
+    /// Skill to select a panel for: adversarial-review or plan-tournament.
+    #[schemars(transform = StringEnum::new(&VALID_SKILLS))]
     pub skill: String,
+    /// Artifact kind: pr_diff, plan, patch, branch_diff, or other.
     #[serde(default)]
+    #[schemars(transform = StringEnum::new(&VALID_ARTIFACT_KINDS))]
     pub artifact_kind: Option<String>,
     #[serde(default)]
     pub host_model: Option<String>,
@@ -156,22 +224,32 @@ pub struct PanelSelection {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[schemars(inline)]
 pub struct RunLegInput {
+    /// Zero-based distinct slot index for this leg.
     pub slot_index: i32,
+    /// Leg role: reviewer or ponytail for adversarial-review; minimal_diff, clean_architecture, edge_cases, critic, or explore_scout for plan-tournament.
+    #[schemars(transform = StringEnum::new(&VALID_LEG_ROLES))]
     pub role: String,
+    /// Model lineage (for example: openai, anthropic, google).
     #[serde(default)]
     pub lineage: String,
+    /// Executed model ID for this leg.
     pub model: String,
     #[serde(default)]
     pub is_challenger: bool,
     #[serde(default)]
     pub trial_id: Option<i64>,
+    /// Execution status (defaults to ok).
     #[serde(default)]
+    #[schemars(transform = StringEnum::with_default(&VALID_LEG_STATUSES, "ok"))]
     pub status: String,
     #[serde(default)]
     pub duration_ms: i32,
+    /// True on the winning planner leg in plan-tournament runs.
     #[serde(default)]
     pub won_core_plan: bool,
+    /// Count of ideas cherry-picked from this planner leg in plan-tournament runs.
     #[serde(default)]
     pub cherry_picks_count: i32,
     #[serde(default)]
@@ -182,16 +260,22 @@ pub struct RunLegInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[schemars(inline)]
 pub struct CandidateInput {
     #[serde(default)]
     pub candidate_key: String,
     #[serde(default)]
     pub summary: String,
+    /// Finding severity (defaults to important).
     #[serde(default)]
+    #[schemars(transform = StringEnum::with_default(&VALID_CANDIDATE_SEVERITIES, "important"))]
     pub severity: String,
+    /// Triage disposition: adopted, set_aside, or open_question.
+    #[schemars(transform = StringEnum::new(&VALID_CANDIDATE_DISPOSITIONS))]
     pub disposition: String,
     #[serde(default)]
     pub caused_approach_pivot: bool,
+    /// Reviewer model IDs (or "ponytail") that proposed this finding.
     pub proposing_models: Vec<String>,
 }
 
@@ -199,14 +283,20 @@ pub struct CandidateInput {
 #[serde(rename_all = "camelCase")]
 pub struct RecordRunInput {
     pub run_key: String,
+    /// Skill being recorded: adversarial-review or plan-tournament.
+    #[schemars(transform = StringEnum::new(&VALID_SKILLS))]
     pub skill: String,
+    /// Artifact kind: pr_diff, plan, patch (local edits), branch_diff, or other (default).
     #[serde(default)]
+    #[schemars(transform = StringEnum::with_default(&VALID_ARTIFACT_KINDS, "other"))]
     pub artifact_kind: String,
     #[serde(default)]
     pub artifact_ref: String,
     #[serde(default)]
     pub repo: String,
+    /// Review phase: independent (default), targeted, or follow_up.
     #[serde(default)]
+    #[schemars(transform = StringEnum::with_default(&VALID_PHASES, "independent"))]
     pub phase: String,
     #[serde(default)]
     pub host_model: String,
@@ -216,9 +306,13 @@ pub struct RecordRunInput {
     pub harness: String,
     #[serde(default)]
     pub machine: String,
+    /// Approach verdict for adversarial-review runs (omit for plan-tournament).
     #[serde(default)]
+    #[schemars(transform = StringEnum::new(&VALID_APPROACH_VERDICT_VALUES))]
     pub approach_verdict: String,
+    /// Winning planner role for plan-tournament runs (omit for adversarial-review).
     #[serde(default)]
+    #[schemars(transform = StringEnum::new(&VALID_WINNING_ROLE_VALUES))]
     pub winning_role: String,
     #[serde(default)]
     #[schemars(with = "Option<String>")]
@@ -246,6 +340,8 @@ pub struct RecordedRunOutput {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct OverrideCandidateInput {
+    /// Override value: confirmed, overturned, or clear.
+    #[schemars(transform = StringEnum::new(&VALID_HUMAN_OVERRIDES))]
     pub human_override: String,
     #[serde(default)]
     pub note: String,
@@ -266,6 +362,7 @@ pub struct LeaderboardQuery {
     /// Lookback window in days (1..=3650, defaults to 90)
     pub days: Option<i32>,
     /// Optional filter: adversarial-review or plan-tournament
+    #[schemars(transform = StringEnum::new(&VALID_SKILLS))]
     pub skill: Option<String>,
     /// Optional owner/repo filter
     pub repo: Option<String>,
@@ -424,7 +521,9 @@ pub struct CodingRunInput {
     pub pr_number: i32,
     #[serde(default)]
     pub issue_ref: String,
+    /// Task kind: feature (default), bugfix, refactor, cleanup, or other.
     #[serde(default)]
+    #[schemars(transform = StringEnum::with_default(&VALID_TASK_KINDS, "feature"))]
     pub task_kind: String,
     #[serde(default)]
     pub loc_added: i32,
@@ -521,6 +620,7 @@ pub struct RecordedCodingRunOutput {
 pub struct OverrideCodingRunInput {
     /// Override value: `confirmed` (marks the PR outcome clean and clears `escapedRegression`),
     /// `overturned` (marks the PR outcome as having an escaped regression), or `clear` (resets to recorded metrics).
+    #[schemars(transform = StringEnum::new(&VALID_HUMAN_OVERRIDES))]
     pub human_override: String,
     #[serde(default)]
     pub note: String,
@@ -543,8 +643,10 @@ pub struct CodingLeaderboardQuery {
     /// Optional owner/repo filter
     pub repo: Option<String>,
     /// Optional task kind filter: feature, bugfix, refactor, cleanup, other
+    #[schemars(transform = StringEnum::new(&VALID_TASK_KINDS))]
     pub task_kind: Option<String>,
     /// Optional diff size bucket filter: S (<50 LOC), M (50..=250 LOC), L (>250 LOC)
+    #[schemars(transform = StringEnum::new(&VALID_SIZE_BUCKETS))]
     pub size_bucket: Option<String>,
     /// Optional RFC3339 lower bound timestamp (overrides days)
     #[schemars(with = "Option<String>")]
