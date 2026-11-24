@@ -48,7 +48,7 @@ Tracks how individual models do end-to-end on real PRs: first-pass clean rate, z
 
 The core loop is four steps: **Select -> Run -> Record -> Decide**.
 
-1. **Select (`select_panel`).** Before a multi-agent review or planning pass starts, the agent asks Model Arena for the lineup. Arena returns the current Champion for each independent lineage (for example Anthropic, OpenAI, and Google), rotates planning lenses round-robin, and swaps in an active Challenger on a configured percentage of runs (default 50%).
+1. **Select (`select_panel`).** Before a multi-agent review or planning pass starts, the agent asks Model Arena for the lineup. For adversarial reviews, PR diffs pull up to 3 reviewers across enabled lineages, while non-PR reviews exclude the known host lineage and pull up to 2. For plan tournaments, Arena fills all 3 planning lens slots by rotating round-robin through the enabled roster. Whenever a selected lineage has an active Challenger trial, Arena swaps the Challenger in on a configured percentage of runs (default 50%).
 2. **Run.** The agent runs those subagents in parallel, times each leg's wall-clock duration, and triages the results with evidence.
 3. **Record (`record_run` / `record_coding_run`).** At the end of a run, the agent spools the telemetry locally (`queueOnly: true`) so it never blocks the conversation, then flushes in the background (`flush_spool`). When a Challenger bout hits its target run count, the server hands back the completed trial so the agent can mention it in chat.
 4. **Decide (`decide_trial`, `set_roster`, `override_*`).** The web UI is intentionally **read-only**. I want a calm dashboard for looking at the numbers, while actual roster changes and promotions stay behind explicit MCP/CLI tool calls.
@@ -59,10 +59,10 @@ Here's what it actually measures under the hood:
 - **Precision (`adopted / (adopted + set_aside)`):** How often a reviewer's findings survive evidence-based triage (or my human override).
 - **Solo Catch Rate (`solo_adopted / runs`):** My favorite stat. Verified bugs that *only* this model caught while every other reviewer missed them.
 - **Approach Pivots:** How often a model's finding actually changes the overall verdict on a plan or PR (`keep` -> `adjust` or `rethink`).
-- **Per-role latency & Straggler Rate:** Tracks p50/p90 duration per `(model, reasoning_effort, skill, role)` and measures how often a model was the slowest leg holding up a parallel panel.
+- **Latency & Straggler Rate:** Pools eligible timed durations per `(model, reasoning_effort)` across the selected runs to report p50/p90 latency, and tracks straggler rate across parallel fanouts with at least two successful timed competing legs (ignoring ties where every leg finishes in the same duration).
 
 ### 2. De-biased Plan Tournaments
-When three planners tackle a problem under three different lenses (`minimal_diff`, `clean_architecture`, `edge_cases`), static assignments skew the scoreboard. Model Arena rotates lenses round-robin across lineages and computes a **macro-averaged de-biased score** (`1/3 * sum(win_rate_in_lens)`) so every model gets graded fairly across every lens. It also tracks **cherry-picks** (good ideas rescued from a non-winning plan) and **critic value vs. bloat** (adopted critic amendments vs. speculative stuff we dropped).
+When three planners tackle a problem under three different lenses (`minimal_diff`, `clean_architecture`, `edge_cases`), static assignments skew the scoreboard. Model Arena rotates lenses round-robin across the roster and computes a **de-biased tournament score**: for each lens with recorded runs, it takes `win_rate + min(cherry_picks / runs, 3.0) * 0.15`, then averages across the lenses observed so sparse history doesn't tank a model unfairly. It also tracks **cherry-picks** (good ideas rescued from a non-winning plan) and **critic value vs. bloat** (adopted critic amendments vs. speculative stuff we dropped).
 
 ### 3. Interaction matrices
 Under **Matrices & History**, two tables keep the whole setup honest:
@@ -73,8 +73,8 @@ Under **Matrices & History**, two tables keep the whole setup honest:
 Instead of swapping a Champion on a whim, I start a bounded trial (`start_trial`) for N runs (usually 15-20) inside one lineage slot. You can pit two different models against each other *or* pit the same model against itself at two different reasoning efforts (`xhigh` vs. `high`).
 
 Trial verdict hints weigh both quality and speed:
-- **Fast Parity Promotion:** If a Challenger matches the Champion on quality (within 2 percentage points) and cuts latency by at least 30% without hurting straggler rate, it gets a `promote` hint.
-- **Latency Bottleneck Guard:** If a Challenger only adds a tiny quality bump (`< +8pp`) while running at least `2x` slower, Arena flags it as a `close_call` with a latency warning instead of nudging me to promote a slowpoke.
+- **Fast Parity Promotion:** If a Challenger matches quality within a tight tolerance (reviews: solo catch rate within `-2pp` and precision within `-3pp`, tournaments: de-biased score within `-0.02`), cuts p50 latency by at least 25%, stays within `+5pp` of the Champion's straggler rate, and doesn't add failures, it gets a `promote` hint.
+- **Slow-Challenger Guard:** If a Challenger is at least `1.5x` slower on p50 latency, a modest quality bump (`< +15pp` solo catch and precision on reviews, or `< +0.20` de-biased score on tournaments) gets downgraded to `close_call` with a latency warning. If it's `1.5x` slower without clearly beating quality (`<= +2pp` solo catch and `<= +3pp` precision on reviews, or `<= +0.02` on tournaments), Arena suggests `retire`.
 
 When you promote a winner (`decide_trial`), Arena atomically shifts the old Champion to Backup and moves the Challenger into the Champion seat.
 
@@ -82,7 +82,7 @@ When you promote a winner (`decide_trial`), Arena atomically shifts the old Cham
 Multi-agent reviews are only half the story. Model Arena also tracks single-model PR runs (`record_coding_run`) bucketed by diff size (`S`: `< 50` LOC, `M`: `50-250` LOC, `L`: `> 250` LOC) and task kind (`feature`, `bugfix`, `refactor`, `cleanup`, `other`). It tracks user steering turns, first-pass clean rate, zero-touch merges, automated review rounds, red CI pushes, time-to-green / time-to-merge percentiles, 24-hour clean merges, and escaped regressions.
 
 ### 6. Human ground-truth overrides
-Host triage is a fast proxy, not gospel. If an adopted finding later turns out to be bogus, or a dismissed warning turns out to be a real bug, `override_candidate` and `override_coding_run` let me mark it `confirmed` or `overturned` and immediately recalculate precision, solo catches, and coding cleanliness scores. Replaying or backfilling a run preserves those overrides.
+Host triage is a fast proxy, not gospel. If an adopted finding later turns out to be bogus, or a dismissed warning turns out to be a real bug, `override_candidate` and `override_coding_run` let me mark it `confirmed` or `overturned` and immediately recalculate precision, solo catches, and coding cleanliness scores. Replaying or backfilling a run preserves overrides for candidates whose `candidate_key` stays the same (either an explicit key or the generated hash of normalized summary + sorted proposing models), while omitted or re-keyed candidates drop their old overrides.
 
 ## Tech Stack
 
