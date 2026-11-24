@@ -48,7 +48,7 @@ Tracks how individual models do end-to-end on real PRs: first-pass clean rate, z
 
 The core loop is four steps: **Select -> Run -> Record -> Decide**.
 
-1. **Select (`select_panel`).** Before a multi-agent review or planning pass starts, the agent asks Model Arena for the lineup. For adversarial reviews, PR diffs pull up to 3 reviewers across enabled lineages, while non-PR reviews exclude the known host lineage and pull up to 2. For plan tournaments, Arena fills all 3 planning lens slots by rotating round-robin through the enabled roster. Whenever a selected lineage has an active Challenger trial, Arena swaps the Challenger in on a configured percentage of runs (default 50%).
+1. **Select (`select_panel`).** Before a multi-agent review or planning pass starts, the agent asks Model Arena for the lineup. For adversarial reviews, PR diffs pull up to 3 reviewers across enabled lineages, while non-PR reviews exclude the known host lineage and pull up to 2. For plan tournaments, Arena fills all 3 planning lens slots by rotating round-robin through the enabled roster. Whenever a selected lineage has an active Challenger trial, Arena swaps the Challenger in on a configured percentage of eligible runs (default 50%, with PR diffs staying on the Champion unless the trial opts in with `allowPrDiff: true`).
 2. **Run.** The agent runs those subagents in parallel, times each leg's wall-clock duration, and triages the results with evidence.
 3. **Record (`record_run` / `record_coding_run`).** At the end of a run, the agent spools the telemetry locally (`queueOnly: true`) so it never blocks the conversation, then flushes in the background (`flush_spool`). When a Challenger bout hits its target run count, the server hands back the completed trial so the agent can mention it in chat.
 4. **Decide (`decide_trial`, `set_roster`, `override_*`).** The web UI is intentionally **read-only**. I want a calm dashboard for looking at the numbers, while actual roster changes and promotions stay behind explicit MCP/CLI tool calls.
@@ -57,7 +57,7 @@ Here's what it actually measures under the hood:
 
 ### 1. Adversarial Review scorecards
 - **Precision (`adopted / (adopted + set_aside)`):** How often a reviewer's findings survive evidence-based triage (or my human override).
-- **Solo Catch Rate (`solo_adopted / runs`):** My favorite stat. Verified bugs that *only* this model caught while every other reviewer missed them.
+- **Solo Catch Rate (`solo_adopted / runs`):** My favorite stat. Adopted findings (via host triage or my human override) where this model was the only successful reviewer proposing that finding in the run.
 - **Approach Pivots:** How often a model's finding actually changes the overall verdict on a plan or PR (`keep` -> `adjust` or `rethink`).
 - **Latency & Straggler Rate:** Pools eligible timed durations per `(model, reasoning_effort)` across the selected runs to report p50/p90 latency, and tracks straggler rate across parallel fanouts with at least two successful timed competing legs (ignoring ties where every leg finishes in the same duration).
 
