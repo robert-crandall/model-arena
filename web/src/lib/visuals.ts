@@ -332,10 +332,12 @@ export function buildScatterPlot(models: ModelScorecard[]): ScatterPlotData {
 
     for (const c of candidates) {
       let penalty = 0;
-      if (c.box.x1 < plotLeft - 4) penalty += 100;
-      if (c.box.x2 > plotRight + 8) penalty += 100;
-      if (c.box.y1 < plotTop - 4) penalty += 100;
-      if (c.box.y2 > plotBottom + 4) penalty += 100;
+      if (c.box.x1 < 4) penalty += 1000 + (4 - c.box.x1) * 10;
+      if (c.box.x2 > width - 4) penalty += 1000 + (c.box.x2 - (width - 4)) * 10;
+      if (c.box.y1 < 4) penalty += 1000 + (4 - c.box.y1) * 10;
+      if (c.box.y2 > plotBottom + 4) {
+        penalty += 1000 + (c.box.y2 - (plotBottom + 4)) * 10;
+      }
 
       for (let j = 0; j < placedBoxes.length; j++) {
         if (j === idx) continue;
@@ -359,10 +361,26 @@ export function buildScatterPlot(models: ModelScorecard[]): ScatterPlotData {
       }
     }
 
-    placedBoxes.push(best.box);
+    // Clamp final label X so it never clips past the left or right SVG canvas edge.
+    let finalX = best.x;
+    let shiftX = 0;
+    if (best.box.x1 < 4) {
+      shiftX = 4 - best.box.x1;
+    } else if (best.box.x2 > width - 4) {
+      shiftX = width - 4 - best.box.x2;
+    }
+    finalX += shiftX;
+    const finalBox = {
+      x1: best.box.x1 + shiftX,
+      y1: best.box.y1,
+      x2: best.box.x2 + shiftX,
+      y2: best.box.y2,
+    };
+
+    placedBoxes.push(finalBox);
     return {
       ...p,
-      labelX: Math.round(best.x),
+      labelX: Math.round(finalX),
       labelY: Math.round(best.y),
       labelAnchor: best.anchor,
     };
@@ -394,6 +412,13 @@ export function buildScatterPlot(models: ModelScorecard[]): ScatterPlotData {
   };
 }
 
+function formatLatency(ms: number): string {
+  if (ms >= 60_000) {
+    return `${(ms / 60_000).toFixed(1)}m`;
+  }
+  return `${Math.round(ms / 1000)}s`;
+}
+
 function deriveArchetype(
   card: ModelScorecard | undefined,
   coding: CodingModelProfile | undefined,
@@ -415,7 +440,13 @@ function deriveArchetype(
   if (!hasReviews && hasPlans) return "Plan Contributor";
 
   if (hasReviews) {
-    if (card.precision < 0.4 && card.soloCatches + card.sharedCatches + card.setAsideCount >= 5) {
+    if (card.reviewRuns < 5 && card.plannerRuns < 5) {
+      return "Early Sample";
+    }
+    if (
+      card.precision < 0.4 &&
+      card.soloCatches + card.sharedCatches + card.setAsideCount >= 5
+    ) {
       return "Noisy / Low Signal";
     }
     if (card.soloCatchRate >= 0.5 && card.precision >= 0.72) {
@@ -428,7 +459,11 @@ function deriveArchetype(
     }
     if (card.precision >= 0.75) {
       if (isStrongPlanner) return "Strong Planner · Clean Reviewer";
-      if (card.timedRuns > 0 && card.stragglerRate <= 0.35) {
+      if (
+        card.timedRuns > 0 &&
+        card.p50DurationMs > 0 &&
+        card.p50DurationMs <= 30_000
+      ) {
         return "Fast Precision Sniper";
       }
       return "Precision Sniper";
@@ -483,11 +518,11 @@ function buildTakeaway(
     }
   }
 
-  if (card && card.timedRuns > 0 && (card.reviewRuns > 0 || card.plannerRuns > 0)) {
-    if (card.stragglerRate >= 0.7) {
+  if (card && card.timedRuns > 0) {
+    if (card.stragglerCount > 0 && card.stragglerRate >= 0.7) {
       parts.push(`slow (${Math.round(card.stragglerRate * 100)}% straggler)`);
-    } else if (card.stragglerRate <= 0.25) {
-      parts.push(`fast (${Math.round(card.stragglerRate * 100)}% straggler)`);
+    } else if (card.p50DurationMs > 0 && card.p50DurationMs <= 30_000) {
+      parts.push(`fast (${formatLatency(card.p50DurationMs)} p50)`);
     }
   }
 
@@ -544,6 +579,10 @@ export function buildStrengthProfiles(
   const maxPlan = Math.max(
     0.65,
     ...models.map((m) => (m.plannerRuns > 0 ? m.debiasedTournamentScore : 0)),
+  );
+  const maxP50Ms = Math.max(
+    60_000,
+    ...models.map((m) => (m.timedRuns > 0 ? m.p50DurationMs : 0)),
   );
 
   const profiles: ModelStrengthProfile[] = [];
@@ -613,12 +652,18 @@ export function buildStrengthProfiles(
       {
         label: "Speed",
         pct:
-          card && card.timedRuns > 0 && (card.reviewRuns > 0 || card.plannerRuns > 0)
-            ? Math.round(clamp((1 - card.stragglerRate) * 100, 6, 100))
+          card && card.timedRuns > 0 && card.p50DurationMs > 0
+            ? Math.round(
+                clamp(
+                  (1 - card.p50DurationMs / (maxP50Ms * 1.15)) * 100,
+                  10,
+                  100,
+                ),
+              )
             : null,
         display:
-          card && card.timedRuns > 0 && (card.reviewRuns > 0 || card.plannerRuns > 0)
-            ? `${Math.round((1 - card.stragglerRate) * 100)}% ok`
+          card && card.timedRuns > 0 && card.p50DurationMs > 0
+            ? `${formatLatency(card.p50DurationMs)} p50`
             : "—",
       },
     ];

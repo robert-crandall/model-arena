@@ -138,6 +138,23 @@ describe("visuals derivations", () => {
     expect(plot.points[0]!.lowSample).toBe(false);
     expect(plot.points[1]!.lowSample).toBe(true);
     expect(plot.points[0]!.r).toBeGreaterThan(plot.points[1]!.r);
+
+    // Boundary placement: a long-labeled bubble at the left/top edge stays inside [0, width].
+    const edgePlot = buildScatterPlot([
+      makeScorecard({
+        model: "very-long-left-edge-model-name",
+        reasoningEffort: "xhigh",
+        reviewRuns: 15,
+        soloCatches: 0,
+        sharedCatches: 5,
+        setAsideCount: 0,
+        soloCatchRate: 0,
+        precision: 1.0,
+      }),
+    ]);
+    const pt = edgePlot.points[0]!;
+    expect(pt.labelX).toBeGreaterThanOrEqual(4);
+    expect(pt.labelX).toBeLessThanOrEqual(edgePlot.width - 4);
   });
 
   it("assigns archetypes, merges case-insensitive keys, computes normalized bars, and handles omitted effort", () => {
@@ -151,6 +168,7 @@ describe("visuals derivations", () => {
           soloCatchRate: 0.65,
           plannerRuns: 10,
           debiasedTournamentScore: 0.6,
+          p50DurationMs: 25_000,
           stragglerRate: 0.2,
         }),
         makeScorecard({
@@ -166,17 +184,21 @@ describe("visuals derivations", () => {
           plannerRuns: 0,
           debiasedTournamentScore: 0,
           criticAdopted: 1,
+          timedRuns: 3,
+          p50DurationMs: 0,
+          stragglerCount: 0,
+          stragglerRate: 0,
         }),
         makeScorecard({
           model: "early-challenger",
           lineage: "google",
-          reviewRuns: 3,
-          soloCatches: 1,
-          sharedCatches: 1,
-          setAsideCount: 1,
+          reviewRuns: 2,
+          soloCatches: 2,
+          sharedCatches: 0,
+          setAsideCount: 0,
           approachPivots: 0,
-          precision: 0.67,
-          soloCatchRate: 0.33,
+          precision: 1.0,
+          soloCatchRate: 1.0,
           plannerRuns: 0,
           criticRuns: 0,
         }),
@@ -197,11 +219,12 @@ describe("visuals derivations", () => {
     expect(allRounder?.archetype).toBe("Top Planner & Reviewer");
     expect(allRounder?.activityMeta).toContain("4 PR");
     expect(allRounder?.summary).toContain("75% first-pass clean across 4 PRs");
+    expect(allRounder?.summary).toContain("fast (25s p50)");
     expect(allRounder?.bars).toEqual([
       { label: "Bug Hunting", pct: 65, display: "0.65/r" },
       { label: "Signal Quality", pct: 78, display: "78%", isDanger: false },
       { label: "Planning", pct: 92, display: "0.60" },
-      { label: "Speed", pct: 80, display: "80% ok" },
+      { label: "Speed", pct: 64, display: "25s p50" },
     ]);
 
     const noisy = byLabel.get("deep-hunter");
@@ -212,7 +235,14 @@ describe("visuals derivations", () => {
       pct: null,
       display: "—",
     });
+    // Zero p50 duration must not render a fake fast Speed bar.
+    expect(noisy?.bars[3]).toEqual({
+      label: "Speed",
+      pct: null,
+      display: "—",
+    });
 
+    // A 2-run model with 100% precision must stay Early Sample, not Star Reviewer.
     expect(byLabel.get("early-challenger (high)")?.archetype).toBe(
       "Early Sample",
     );

@@ -767,7 +767,7 @@ describe("Model Arena SPA foundation", () => {
     await waitFor(() => {
       expect(host.textContent).toContain("Model strength profiles");
       expect(host.textContent).toContain("claude-opus-4.7 (high)");
-      expect(host.textContent).toContain("Top Planner & Reviewer");
+      expect(host.textContent).toContain("Early Sample");
       expect(host.textContent).toContain("Plan tournament: who wins which lens?");
       expect(host.querySelectorAll(".scatter-point").length).toBe(1);
     });
@@ -866,7 +866,49 @@ describe("Model Arena SPA foundation", () => {
       expect(host.textContent).not.toContain("claude-opus-4.7 (high)");
       expect(host.textContent).toContain("Edge Cases");
       expect(host.textContent).not.toContain("Minimalist");
+      expect(host.textContent).toContain("3 / 4 wins");
       expect(host.querySelectorAll(".scatter-point").length).toBe(1);
+    });
+
+    // Update metrics in-place for the same model and lens keys to verify reactive SVG/card/heatmap updates.
+    const initialCx = host
+      .querySelector(".scatter-point circle")
+      ?.getAttribute("cx");
+    leaderboardData = {
+      ...leaderboardData,
+      models: [
+        {
+          ...sampleCard,
+          model: "gpt-5.4",
+          reasoningEffort: "xhigh",
+          lineage: "openai",
+          reviewRuns: 20,
+          soloCatches: 4,
+          soloCatchRate: 0.2,
+          precision: 0.5,
+        },
+      ],
+      lensMatrix: [
+        {
+          model: "gpt-5.4",
+          reasoningEffort: "xhigh",
+          lens: "edge_cases",
+          runs: 6,
+          wins: 5,
+          winRate: 5 / 6,
+          cherryPicks: 8,
+        },
+      ],
+    };
+    refreshBtn.click();
+
+    await waitFor(() => {
+      const updatedCx = host
+        .querySelector(".scatter-point circle")
+        ?.getAttribute("cx");
+      expect(updatedCx).not.toBe(initialCx);
+      expect(host.textContent).toContain("0.20/r");
+      expect(host.textContent).toContain("5 / 6 wins");
     });
 
     leaderboardData = {

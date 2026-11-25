@@ -76,7 +76,12 @@ export function ArenaOverview(props: {
               </div>
             </div>
 
-            <div class="scatter-wrap">
+            <div
+              class="scatter-wrap"
+              tabindex={0}
+              role="region"
+              aria-label="Reviewer scatter plot"
+            >
               <svg
                 class="scatter-svg"
                 viewBox={`0 0 ${scatter().width} ${scatter().height}`}
@@ -310,7 +315,12 @@ export function ArenaOverview(props: {
               </div>
             </div>
 
-            <div class="table-scroll heatmap-scroll">
+            <div
+              class="table-scroll heatmap-scroll"
+              tabindex={0}
+              role="region"
+              aria-label="Plan tournament lens heatmap"
+            >
               <table class="heatmap-table">
                 <thead>
                   <tr>
@@ -419,10 +429,10 @@ export function ArenaOverview(props: {
               </dd>
             </div>
             <div>
-              <dt>Speed (% ok / Straggler Rate)</dt>
+              <dt>Speed (p50 Latency)</dt>
               <dd>
-                Share of parallel runs where this model was <em>not</em> the
-                slowest straggler holding up the panel.
+                Median (p50) response time across timed runs. Fuller bars mean
+                faster turnaround relative to peers.
               </dd>
             </div>
           </dl>
