@@ -765,14 +765,24 @@ describe("Model Arena SPA foundation", () => {
     dispose = render(() => <App />, host);
 
     await waitFor(() => {
+      expect(host.textContent).toContain("Model strength profiles");
       expect(host.textContent).toContain("claude-opus-4.7 (high)");
-      expect(host.textContent).toContain("28.0s / 42.0s");
+      expect(host.textContent).toContain("Top Planner & Reviewer");
+      expect(host.textContent).toContain("Plan tournament: who wins which lens?");
+      expect(host.querySelectorAll(".scatter-point").length).toBe(1);
     });
 
     // Switch through tabs and verify read-only views
     const tabs = Array.from(
       host.querySelectorAll<HTMLButtonElement>(".tab-btn"),
     );
+    const reviewTab = tabs.find((btn) =>
+      btn.textContent?.includes("Adversarial Review"),
+    )!;
+    reviewTab.click();
+    flush();
+    expect(host.textContent).toContain("28.0s / 42.0s");
+
     const codingTab = tabs.find((btn) =>
       btn.textContent?.includes("Coding & PRs"),
     )!;

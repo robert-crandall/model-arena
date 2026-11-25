@@ -24,6 +24,11 @@ Model Arena turns all of that into a lightweight, empirical feedback loop across
 
 *(Captured with synthetic sample data so nobody's private repos or emails end up in git.)*
 
+### Visual Overview (model strengths at a glance)
+Default landing view that turns the raw telemetry into three visual reads: an Adversarial Review quadrant scatter plot (unique bug hunting vs. signal quality), normalized Model Strength Profile cards with plain-English archetype badges, and a Plan Tournament lens heatmap, plus a collapsible metric guide.
+
+![Visual Overview showing model strengths](docs/screenshots/overview.png)
+
 ### Adversarial Review scorecards & latency
 Tracks solo catch rate, precision, p50/p90 latency, straggler rate, and catches per minute per `(model, reasoning_effort)`.
 
