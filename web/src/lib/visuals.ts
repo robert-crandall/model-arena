@@ -440,7 +440,10 @@ function deriveArchetype(
   if (!hasReviews && hasPlans) return "Plan Contributor";
 
   if (hasReviews) {
-    if (card.reviewRuns < 5 && card.plannerRuns < 5) {
+    if (card.reviewRuns < 5) {
+      if (card.plannerRuns >= 5) {
+        return isStrongPlanner ? "Strong Planner" : "Plan Contributor";
+      }
       return "Early Sample";
     }
     if (
@@ -607,11 +610,14 @@ export function buildStrengthProfiles(
       activityParts.push(`${coding.totalRuns} PR`);
     }
 
-    const totalActivity =
-      (card?.reviewRuns ?? 0) +
-      (card?.plannerRuns ?? 0) +
-      (card?.criticRuns ?? 0) +
-      (coding?.totalRuns ?? 0);
+    const domainCounts = [
+      card?.reviewRuns ?? 0,
+      card?.plannerRuns ?? 0,
+      card?.criticRuns ?? 0,
+      coding?.totalRuns ?? 0,
+    ].filter((n) => n > 0);
+
+    const totalActivity = domainCounts.reduce((sum, n) => sum + n, 0);
 
     const decided =
       (card?.soloCatches ?? 0) +
@@ -673,7 +679,9 @@ export function buildStrengthProfiles(
       label: formatModelName(model, effort),
       lineage,
       isChampion: Boolean(card?.isCurrentChampion),
-      lowSample: totalActivity < LOW_SAMPLE_THRESHOLD,
+      lowSample:
+        domainCounts.length === 0 ||
+        domainCounts.some((n) => n < LOW_SAMPLE_THRESHOLD),
       activityMeta: activityParts.join(" · "),
       archetype: deriveArchetype(card, coding),
       bars,

@@ -252,6 +252,46 @@ describe("visuals derivations", () => {
     );
   });
 
+  it("gates reviewer archetypes and lowSample per telemetry domain", () => {
+    const profiles = buildStrengthProfiles(
+      [
+        makeScorecard({
+          model: "mixed-early",
+          reviewRuns: 2,
+          soloCatches: 2,
+          sharedCatches: 0,
+          setAsideCount: 0,
+          soloCatchRate: 1.0,
+          precision: 1.0,
+          plannerRuns: 8,
+          debiasedTournamentScore: 0.6,
+          criticRuns: 0,
+        }),
+        makeScorecard({
+          model: "mature-both",
+          reviewRuns: 10,
+          soloCatches: 6,
+          sharedCatches: 4,
+          setAsideCount: 0,
+          soloCatchRate: 0.6,
+          precision: 1.0,
+          plannerRuns: 10,
+          debiasedTournamentScore: 0.6,
+          criticRuns: 0,
+        }),
+      ],
+      [],
+    );
+
+    const byLabel = new Map(profiles.map((p) => [p.label, p]));
+    expect(byLabel.get("mixed-early (high)")?.archetype).toBe("Strong Planner");
+    expect(byLabel.get("mixed-early (high)")?.lowSample).toBe(true);
+    expect(byLabel.get("mature-both (high)")?.archetype).toBe(
+      "Top Planner & Reviewer",
+    );
+    expect(byLabel.get("mature-both (high)")?.lowSample).toBe(false);
+  });
+
   it("pivots plan tournament lens cells in canonical order and preserves missing cells as null", () => {
     const cells: LensCell[] = [
       {
