@@ -84,14 +84,18 @@ function makeCodingProfile(
 }
 
 describe("visuals derivations", () => {
-  it("maps known lineages to CSS tokens and unknown lineages to fallback", () => {
+  it("maps known lineages to CSS tokens and unknown lineages to Other fallback", () => {
     expect(lineageTone("anthropic").colorVar).toBe("var(--chart-anthropic)");
     expect(lineageTone("OpenAI").colorVar).toBe("var(--chart-openai)");
     expect(lineageTone("google").colorVar).toBe("var(--chart-google)");
-    expect(lineageTone("local").colorVar).toBe("var(--chart-other)");
+    expect(lineageTone("local")).toEqual({
+      key: "other",
+      label: "Other",
+      colorVar: "var(--chart-other)",
+    });
   });
 
-  it("scales scatter plot dynamically, marks low-n models, and excludes models without review runs", () => {
+  it("scales scatter plot dynamically, marks low-n models, and excludes models without decided findings", () => {
     const plot = buildScatterPlot([
       makeScorecard({
         model: "m-high",
@@ -112,6 +116,14 @@ describe("visuals derivations", () => {
         precision: 0.5,
       }),
       makeScorecard({
+        model: "m-no-decided",
+        reviewRuns: 5,
+        soloCatches: 0,
+        sharedCatches: 0,
+        setAsideCount: 0,
+        precision: 0,
+      }),
+      makeScorecard({
         model: "m-plan-only",
         reviewRuns: 0,
         plannerRuns: 6,
@@ -128,25 +140,31 @@ describe("visuals derivations", () => {
     expect(plot.points[0]!.r).toBeGreaterThan(plot.points[1]!.r);
   });
 
-  it("assigns archetypes, includes coding-only models, and flags low-sample profiles", () => {
+  it("assigns archetypes, merges case-insensitive keys, computes normalized bars, and handles omitted effort", () => {
     const profiles = buildStrengthProfiles(
       [
         makeScorecard({
-          model: "all-rounder",
+          model: "All-Rounder",
+          reasoningEffort: "HIGH",
           reviewRuns: 20,
           precision: 0.78,
           soloCatchRate: 0.65,
           plannerRuns: 10,
           debiasedTournamentScore: 0.6,
+          stragglerRate: 0.2,
         }),
         makeScorecard({
           model: "deep-hunter",
+          reasoningEffort: undefined,
           lineage: "openai",
           reviewRuns: 18,
-          precision: 0.55,
+          soloCatches: 2,
+          sharedCatches: 0,
+          setAsideCount: 6,
+          precision: 0.25,
           soloCatchRate: 0.85,
-          plannerRuns: 2,
-          debiasedTournamentScore: 0.2,
+          plannerRuns: 0,
+          debiasedTournamentScore: 0,
           criticAdopted: 1,
         }),
         makeScorecard({
@@ -163,16 +181,38 @@ describe("visuals derivations", () => {
           criticRuns: 0,
         }),
       ],
-      [makeCodingProfile({ model: "solo-coder", totalRuns: 6 })],
+      [
+        makeCodingProfile({
+          model: "all-rounder",
+          reasoningEffort: "high",
+          totalRuns: 4,
+          firstPassCleanRate: 0.75,
+        }),
+        makeCodingProfile({ model: "solo-coder", totalRuns: 6 }),
+      ],
     );
 
     const byLabel = new Map(profiles.map((p) => [p.label, p]));
-    expect(byLabel.get("all-rounder (high)")?.archetype).toBe(
-      "Top Planner & Reviewer",
-    );
-    expect(byLabel.get("deep-hunter (high)")?.archetype).toBe(
-      "Deep Bug Hunter",
-    );
+    const allRounder = byLabel.get("All-Rounder (HIGH)");
+    expect(allRounder?.archetype).toBe("Top Planner & Reviewer");
+    expect(allRounder?.activityMeta).toContain("4 PR");
+    expect(allRounder?.summary).toContain("75% first-pass clean across 4 PRs");
+    expect(allRounder?.bars).toEqual([
+      { label: "Bug Hunting", pct: 65, display: "0.65/r" },
+      { label: "Signal Quality", pct: 78, display: "78%", isDanger: false },
+      { label: "Planning", pct: 92, display: "0.60" },
+      { label: "Speed", pct: 80, display: "80% ok" },
+    ]);
+
+    const noisy = byLabel.get("deep-hunter");
+    expect(noisy?.archetype).toBe("Noisy / Low Signal");
+    expect(noisy?.bars[1]?.isDanger).toBe(true);
+    expect(noisy?.bars[2]).toEqual({
+      label: "Planning",
+      pct: null,
+      display: "—",
+    });
+
     expect(byLabel.get("early-challenger (high)")?.archetype).toBe(
       "Early Sample",
     );

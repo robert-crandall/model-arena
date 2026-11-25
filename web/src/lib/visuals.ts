@@ -105,7 +105,7 @@ const CANONICAL_LENSES: LensColumn[] = [
 ];
 
 export function formatModelKey(model: string, reasoningEffort?: string): string {
-  return `${model}::${reasoningEffort ?? ""}`;
+  return `${model.trim().toLowerCase()}::${(reasoningEffort ?? "").trim().toLowerCase()}`;
 }
 
 export function formatModelName(model: string, reasoningEffort?: string): string {
@@ -137,7 +137,7 @@ export function lineageTone(lineage: string): LineageTone {
   }
   return {
     key: "other",
-    label: lineage ? lineage : "Other",
+    label: "Other",
     colorVar: "var(--chart-other)",
   };
 }
@@ -172,7 +172,11 @@ export function buildScatterPlot(models: ModelScorecard[]): ScatterPlotData {
   const plotH = plotBottom - plotTop;
 
   const reviewModels = models
-    .filter((m) => m.reviewRuns > 0)
+    .filter(
+      (m) =>
+        m.reviewRuns > 0 &&
+        m.soloCatches + m.sharedCatches + m.setAsideCount > 0,
+    )
     .slice()
     .sort((a, b) => b.reviewRuns - a.reviewRuns);
 
@@ -479,7 +483,7 @@ function buildTakeaway(
     }
   }
 
-  if (card && card.timedRuns > 0) {
+  if (card && card.timedRuns > 0 && (card.reviewRuns > 0 || card.plannerRuns > 0)) {
     if (card.stragglerRate >= 0.7) {
       parts.push(`slow (${Math.round(card.stragglerRate * 100)}% straggler)`);
     } else if (card.stragglerRate <= 0.25) {
@@ -547,7 +551,7 @@ export function buildStrengthProfiles(
   for (const [id, entry] of byKey.entries()) {
     const { card, coding } = entry;
     const model = card?.model ?? coding!.model;
-    const effort = card?.reasoningEffort ?? coding!.reasoningEffort;
+    const effort = card?.reasoningEffort ?? coding?.reasoningEffort;
     const lineage = lineageTone(card?.lineage ?? coding!.lineage);
 
     const activityParts: string[] = [];
@@ -609,11 +613,11 @@ export function buildStrengthProfiles(
       {
         label: "Speed",
         pct:
-          card && card.timedRuns > 0
+          card && card.timedRuns > 0 && (card.reviewRuns > 0 || card.plannerRuns > 0)
             ? Math.round(clamp((1 - card.stragglerRate) * 100, 6, 100))
             : null,
         display:
-          card && card.timedRuns > 0
+          card && card.timedRuns > 0 && (card.reviewRuns > 0 || card.plannerRuns > 0)
             ? `${Math.round((1 - card.stragglerRate) * 100)}% ok`
             : "—",
       },
