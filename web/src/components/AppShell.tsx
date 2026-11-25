@@ -17,9 +17,16 @@ import {
   type User,
 } from "../lib/api/client";
 import { useAuth } from "../lib/auth";
+import { ArenaOverview } from "./ArenaOverview";
 import { ThemePicker } from "./ThemePicker";
 
-type ArenaTab = "review" | "tournament" | "coding" | "trials" | "history";
+type ArenaTab =
+  | "overview"
+  | "review"
+  | "tournament"
+  | "coding"
+  | "trials"
+  | "history";
 
 function formatPct(val: number): string {
   return `${(val * 100).toFixed(1)}%`;
@@ -43,7 +50,7 @@ function formatModelLabel(model: string, effort?: string): string {
 
 export function AppShell(props: { user: User }) {
   const auth = useAuth();
-  const [activeTab, setActiveTab] = createSignal<ArenaTab>("review");
+  const [activeTab, setActiveTab] = createSignal<ArenaTab>("overview");
   const [daysWindow, setDaysWindow] = createSignal<number>(90);
   const [repoFilter, setRepoFilter] = createSignal<string>("");
   const [arenaLoading, setArenaLoading] = createSignal(false);
@@ -373,6 +380,14 @@ export function AppShell(props: { user: User }) {
           <nav class="arena-tabs" aria-label="Telemetry views">
             <button
               type="button"
+              class={["tab-btn", { active: activeTab() === "overview" }]}
+              aria-pressed={activeTab() === "overview" ? "true" : "false"}
+              onClick={() => setActiveTab("overview")}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
               class={["tab-btn", { active: activeTab() === "review" }]}
               aria-pressed={activeTab() === "review" ? "true" : "false"}
               onClick={() => setActiveTab("review")}
@@ -414,6 +429,13 @@ export function AppShell(props: { user: User }) {
           </nav>
 
           <Switch>
+            <Match when={activeTab() === "overview"}>
+              <ArenaOverview
+                leaderboard={leaderboard()}
+                codingBoard={codingBoard()}
+              />
+            </Match>
+
             <Match when={activeTab() === "review"}>
               <div class="arena-panel">
                 <h2>Adversarial review scorecards &amp; latency</h2>

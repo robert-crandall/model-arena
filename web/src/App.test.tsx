@@ -765,14 +765,31 @@ describe("Model Arena SPA foundation", () => {
     dispose = render(() => <App />, host);
 
     await waitFor(() => {
+      expect(host.textContent).toContain("Model strength profiles");
       expect(host.textContent).toContain("claude-opus-4.7 (high)");
-      expect(host.textContent).toContain("28.0s / 42.0s");
+      expect(host.textContent).toContain("Early Sample");
+      expect(host.textContent).toContain("Plan tournament: who wins which lens?");
+      expect(host.querySelectorAll(".scatter-point").length).toBe(1);
+      const scatterSvg = host.querySelector("svg.scatter-svg");
+      const descId = scatterSvg?.getAttribute("aria-describedby");
+      expect(descId).toBe("reviewer-scatter-desc");
+      const scatterDesc = descId ? host.querySelector(`#${descId}`) : null;
+      expect(scatterDesc?.textContent).toContain("claude-opus-4.7 (high)");
+      expect(scatterDesc?.textContent).toContain("shared");
+      expect(scatterDesc?.textContent).toContain("pivots");
     });
 
     // Switch through tabs and verify read-only views
     const tabs = Array.from(
       host.querySelectorAll<HTMLButtonElement>(".tab-btn"),
     );
+    const reviewTab = tabs.find((btn) =>
+      btn.textContent?.includes("Adversarial Review"),
+    )!;
+    reviewTab.click();
+    flush();
+    expect(host.textContent).toContain("28.0s / 42.0s");
+
     const codingTab = tabs.find((btn) =>
       btn.textContent?.includes("Coding & PRs"),
     )!;
@@ -809,6 +826,115 @@ describe("Model Arena SPA foundation", () => {
     );
     expect(allButtons.some((label) => label.includes("promote"))).toBe(false);
     expect(allButtons.some((label) => label.includes("retire"))).toBe(false);
+
+    // Return to Overview and verify reactive updates when telemetry changes or empties.
+    const overviewTab = tabs.find((btn) => btn.textContent?.includes("Overview"))!;
+    overviewTab.click();
+    flush();
+
+    leaderboardData = {
+      ...leaderboardData,
+      models: [
+        {
+          ...sampleCard,
+          model: "gpt-5.4",
+          reasoningEffort: "xhigh",
+          lineage: "openai",
+          reviewRuns: 15,
+          soloCatches: 12,
+          soloCatchRate: 0.8,
+          precision: 0.82,
+        },
+      ],
+      lensMatrix: [
+        {
+          model: "gpt-5.4",
+          reasoningEffort: "xhigh",
+          lens: "edge_cases",
+          runs: 4,
+          wins: 3,
+          winRate: 0.75,
+          cherryPicks: 5,
+        },
+      ],
+    };
+    codingLeaderboardData = {
+      ...codingLeaderboardData,
+      totalRuns: 0,
+      models: [],
+    };
+    const refreshBtn = Array.from(host.querySelectorAll("button")).find((btn) =>
+      btn.textContent?.includes("Refresh"),
+    )!;
+    refreshBtn.click();
+
+    await waitFor(() => {
+      expect(host.textContent).toContain("gpt-5.4 (xhigh)");
+      expect(host.textContent).not.toContain("claude-opus-4.7 (high)");
+      expect(host.textContent).toContain("Edge Cases");
+      expect(host.textContent).not.toContain("Minimalist");
+      expect(host.textContent).toContain("3 / 4 wins");
+      expect(host.querySelectorAll(".scatter-point").length).toBe(1);
+    });
+
+    // Update metrics in-place for the same model and lens keys to verify reactive SVG/card/heatmap updates.
+    const initialCx = host
+      .querySelector(".scatter-point circle")
+      ?.getAttribute("cx");
+    leaderboardData = {
+      ...leaderboardData,
+      models: [
+        {
+          ...sampleCard,
+          model: "gpt-5.4",
+          reasoningEffort: "xhigh",
+          lineage: "openai",
+          reviewRuns: 20,
+          soloCatches: 4,
+          soloCatchRate: 0.2,
+          precision: 0.5,
+        },
+      ],
+      lensMatrix: [
+        {
+          model: "gpt-5.4",
+          reasoningEffort: "xhigh",
+          lens: "edge_cases",
+          runs: 6,
+          wins: 5,
+          winRate: 5 / 6,
+          cherryPicks: 8,
+        },
+      ],
+    };
+    refreshBtn.click();
+
+    await waitFor(() => {
+      const updatedCx = host
+        .querySelector(".scatter-point circle")
+        ?.getAttribute("cx");
+      expect(updatedCx).not.toBe(initialCx);
+      expect(host.textContent).toContain("0.20/r");
+      expect(host.textContent).toContain("5 / 6 wins");
+    });
+
+    leaderboardData = {
+      ...leaderboardData,
+      totalRuns: 0,
+      models: [],
+      lensMatrix: [],
+    };
+    refreshBtn.click();
+
+    await waitFor(() => {
+      expect(host.querySelectorAll(".scatter-point").length).toBe(0);
+      expect(host.textContent).toContain(
+        "No model telemetry recorded in this window yet",
+      );
+      expect(host.textContent).not.toContain(
+        "Plan tournament: who wins which lens?",
+      );
+    });
   });
 
 });
