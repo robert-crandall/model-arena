@@ -770,6 +770,13 @@ describe("Model Arena SPA foundation", () => {
       expect(host.textContent).toContain("Early Sample");
       expect(host.textContent).toContain("Plan tournament: who wins which lens?");
       expect(host.querySelectorAll(".scatter-point").length).toBe(1);
+      const scatterSvg = host.querySelector("svg.scatter-svg");
+      const descId = scatterSvg?.getAttribute("aria-describedby");
+      expect(descId).toBe("reviewer-scatter-desc");
+      const scatterDesc = descId ? host.querySelector(`#${descId}`) : null;
+      expect(scatterDesc?.textContent).toContain("claude-opus-4.7 (high)");
+      expect(scatterDesc?.textContent).toContain("shared");
+      expect(scatterDesc?.textContent).toContain("pivots");
     });
 
     // Switch through tabs and verify read-only views

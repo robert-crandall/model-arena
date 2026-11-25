@@ -4,7 +4,12 @@ import {
   buildLensHeatmap,
   buildScatterPlot,
   buildStrengthProfiles,
+  type ScatterPoint,
 } from "../lib/visuals";
+
+function formatScatterPointSummary(pt: ScatterPoint): string {
+  return `${pt.label} (${pt.lineage.label}): n=${pt.reviewRuns} reviews, ${(pt.precision * 100).toFixed(1)}% precision, ${pt.soloCatchRate.toFixed(2)} solo catches/run (${pt.soloCatches} solo, ${pt.sharedCatches} shared, ${pt.setAsideCount} set-aside, ${pt.approachPivots} pivots)`;
+}
 
 export function ArenaOverview(props: {
   leaderboard: Leaderboard | null;
@@ -87,7 +92,11 @@ export function ArenaOverview(props: {
                 viewBox={`0 0 ${scatter().width} ${scatter().height}`}
                 role="img"
                 aria-label="Scatter plot comparing reviewer solo catch rate against precision"
+                aria-describedby="reviewer-scatter-desc"
               >
+                <desc id="reviewer-scatter-desc">
+                  {scatter().points.map(formatScatterPointSummary).join("; ")}
+                </desc>
                 {/* Horizontal grid lines */}
                 <For each={scatter().yTicks}>
                   {(tick) => (
@@ -196,9 +205,7 @@ export function ArenaOverview(props: {
                 <For each={scatter().points}>
                   {(pt) => (
                     <g class="scatter-point">
-                      <title>
-                        {`${pt.label} (${pt.lineage.label}) — n=${pt.reviewRuns} reviews, ${(pt.precision * 100).toFixed(1)}% precision, ${pt.soloCatchRate.toFixed(2)} solo catches/run (${pt.soloCatches} solo, ${pt.sharedCatches} shared, ${pt.setAsideCount} set-aside, ${pt.approachPivots} pivots)`}
-                      </title>
+                      <title>{formatScatterPointSummary(pt)}</title>
                       <circle
                         cx={pt.cx}
                         cy={pt.cy}
