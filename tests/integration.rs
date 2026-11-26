@@ -3053,6 +3053,54 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
         "Updated rationale via offline spool"
     );
 
+    // 4c. Direct POST omitting clientSentAt stamps server receipt time so an older queued replay cannot clobber it.
+    let mut direct_no_ts = judged_payload.clone();
+    direct_no_ts.as_object_mut().unwrap().remove("clientSentAt");
+    direct_no_ts["winner"] = json!("champion");
+    direct_no_ts["judgeRationale"] = json!("Direct update without clientSentAt");
+    let direct_res: Value = client
+        .post(format!("{base_url}/api/shadow-bouts"))
+        .json(&direct_no_ts)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(direct_res["winner"], "champion");
+
+    let mut stale_replay = judged_payload.clone();
+    stale_replay["winner"] = json!("challenger");
+    stale_replay["judgeRationale"] = json!("Stale queued overwrite");
+    stale_replay["clientSentAt"] = json!(t3);
+    let stale_res: Value = client
+        .post(format!("{base_url}/api/shadow-bouts"))
+        .json(&stale_replay)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stale_res["winner"], "champion");
+
+    let lb_after_stale: Value = client
+        .get(format!(
+            "{base_url}/api/shadow-leaderboard?days=90&track=coding"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        lb_after_stale["recentBouts"][0]["judgeRationale"]
+            .as_str()
+            .unwrap(),
+        "Direct update without clientSentAt"
+    );
+
     // 5. Verify leaderboard filters by track and championSource via MCP CLI, and that new offline bout kept clientSentAt as occurredAt.
     let lb_out = Command::new(mcp_bin)
         .env("MODEL_ARENA_SPOOL_DIR", &spool_root)

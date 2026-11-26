@@ -476,7 +476,7 @@ struct ExistingBoutRow {
     judge_lineage: String,
     judge_rationale: String,
     judged_at: Option<DateTime<Utc>>,
-    client_sent_at: Option<DateTime<Utc>>,
+    prev_sent_at: DateTime<Utc>,
 }
 
 async fn insert_leg(
@@ -537,8 +537,11 @@ pub async fn record_shadow_bout(
     })?;
     lock_user_row(&mut tx, user_id).await?;
 
+    let effective_client_sent_at = input.client_sent_at.unwrap_or(now);
+
     let existing = sqlx::query_as::<_, ExistingBoutRow>(
-        "SELECT id, winner, judge_model, judge_lineage, judge_rationale, judged_at, client_sent_at
+        "SELECT id, winner, judge_model, judge_lineage, judge_rationale, judged_at,
+                COALESCE(client_sent_at, recorded_at) AS prev_sent_at
          FROM arena_shadow_bouts
          WHERE user_id = $1 AND bout_key = $2
          FOR UPDATE",
@@ -554,10 +557,9 @@ pub async fn record_shadow_bout(
 
     let (bout_id, effective_winner) = match existing {
         Some(prev) => {
-            let incoming_is_stale = match (input.client_sent_at, prev.client_sent_at) {
-                (Some(inc), Some(old)) => inc < old,
-                _ => false,
-            };
+            let incoming_is_stale = input
+                .client_sent_at
+                .is_some_and(|inc| inc < prev.prev_sent_at);
 
             if incoming_is_stale {
                 // Never clobber newer execution data, but still accept a missing judgment.
@@ -641,7 +643,7 @@ pub async fn record_shadow_bout(
                          judged_at = $18,
                          occurred_at = COALESCE($19, occurred_at),
                          recorded_at = NOW(),
-                         client_sent_at = COALESCE($20, client_sent_at)
+                         client_sent_at = $20
                      WHERE id = $1",
                 )
                 .bind(prev.id)
@@ -663,7 +665,7 @@ pub async fn record_shadow_bout(
                 .bind(&judge_rationale)
                 .bind(judged_at)
                 .bind(input.occurred_at)
-                .bind(input.client_sent_at)
+                .bind(effective_client_sent_at)
                 .execute(&mut *tx)
                 .await
                 .map_err(|err| {
@@ -730,7 +732,7 @@ pub async fn record_shadow_bout(
             .bind(&input.judge_rationale)
             .bind(judged_at)
             .bind(occurred_at)
-            .bind(input.client_sent_at)
+            .bind(effective_client_sent_at)
             .fetch_one(&mut *tx)
             .await
             .map_err(|err| {
