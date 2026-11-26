@@ -413,6 +413,11 @@ pub fn validate_and_normalize_shadow_bout_input(
     if input.champion_human_turns < 0 {
         return Err(ApiError::bad_request("championHumanTurns must be >= 0"));
     }
+    if input.champion_source == CHAMPION_SOURCE_HEADLESS && input.champion_human_turns > 0 {
+        return Err(ApiError::bad_request(
+            "championHumanTurns must be 0 when championSource is headless",
+        ));
+    }
     input.repo = input.repo.trim().to_string();
     input.base_sha = input.base_sha.trim().to_string();
     input.task_ref = input.task_ref.trim().to_string();
@@ -1294,6 +1299,17 @@ mod tests {
         let mut bad_metrics = sample_bout("sb_4", "");
         bad_metrics.champion.metrics = serde_json::json!(["not-an-object"]);
         assert!(validate_and_normalize_shadow_bout_input(&mut bad_metrics).is_err());
+
+        let mut bad_headless_turns = sample_bout("sb_5", "");
+        bad_headless_turns.champion_source = String::new();
+        bad_headless_turns.champion_human_turns = 2;
+        assert!(validate_and_normalize_shadow_bout_input(&mut bad_headless_turns).is_err());
+
+        let mut existing_ref_turns = sample_bout("sb_6", "");
+        existing_ref_turns.champion_source = "existing_ref".to_string();
+        existing_ref_turns.champion_human_turns = 2;
+        validate_and_normalize_shadow_bout_input(&mut existing_ref_turns)
+            .expect("existing_ref may have positive human turns");
     }
 
     #[test]

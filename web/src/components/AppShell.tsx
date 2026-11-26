@@ -130,12 +130,7 @@ export function AppShell(props: { user: User }) {
     setArenaLoading(true);
     setArenaError(null);
     const trimmedRepo = repo.trim() || undefined;
-    const shadowPromise = loadShadowData(
-      days,
-      repo,
-      shadowTrack(),
-      shadowSource(),
-    );
+    void loadShadowData(days, repo, shadowTrack(), shadowSource());
     try {
       const [lbRes, codingRes] = await Promise.all([
         api.GET("/api/leaderboard", {
@@ -155,7 +150,6 @@ export function AppShell(props: { user: User }) {
           },
         }),
       ]);
-      await shadowPromise;
       if (seq !== arenaLoadSeq) return;
       if (lbRes.error || !lbRes.data) {
         setLeaderboard(null);
