@@ -686,7 +686,7 @@ pub async fn record_shadow_bout(
             }
         }
         None => {
-            let occurred_at = input.occurred_at.unwrap_or(now);
+            let occurred_at = input.occurred_at.or(input.client_sent_at).unwrap_or(now);
             let judged_at = if input.winner.is_empty() {
                 None
             } else {
@@ -1100,6 +1100,18 @@ pub async fn get_shadow_leaderboard(
         .unwrap_or_else(|| Utc::now() - ChronoDuration::days(days as i64));
     let until = query.to;
 
+    let mut tx = pool.begin().await.map_err(|err| {
+        tracing::error!(?err, "failed to start shadow leaderboard transaction");
+        ApiError::internal("failed to load shadow leaderboard")
+    })?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "failed to set shadow leaderboard snapshot isolation");
+            ApiError::internal("failed to load shadow leaderboard")
+        })?;
+
     let bout_rows = sqlx::query_as::<_, BoutRow>(
         "SELECT id, bout_key, track, champion_source, champion_human_turns,
                 repo, base_sha, task_ref, task_kind,
@@ -1121,7 +1133,7 @@ pub async fn get_shadow_leaderboard(
     .bind(&track_filter)
     .bind(&source_filter)
     .bind(&repo_filter)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|err| {
         tracing::error!(?err, "failed to query shadow bouts");
@@ -1129,6 +1141,7 @@ pub async fn get_shadow_leaderboard(
     })?;
 
     if bout_rows.is_empty() {
+        let _ = tx.commit().await;
         return Ok(ShadowLeaderboard {
             window_days: days,
             total_bouts: 0,
@@ -1149,12 +1162,13 @@ pub async fn get_shadow_leaderboard(
          WHERE bout_id = ANY($1)",
     )
     .bind(&bout_ids)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|err| {
         tracing::error!(?err, "failed to query shadow bout legs");
         ApiError::internal("failed to load shadow leaderboard")
     })?;
+    let _ = tx.commit().await;
 
     let mut legs_by_bout: HashMap<i64, (Option<ShadowBoutSideView>, Option<ShadowBoutSideView>)> =
         HashMap::with_capacity(bout_ids.len());

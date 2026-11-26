@@ -2746,9 +2746,13 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
     assert_eq!(reg.status(), StatusCode::CREATED);
 
     // 1. Record an unjudged coding shadow bout.
-    let t1 = "2026-11-26T10:00:00Z";
-    let t2 = "2026-11-26T10:05:00Z";
-    let t3 = "2026-11-26T10:10:00Z";
+    let now = chrono::Utc::now();
+    let fmt_ts = |d: chrono::Duration| (now - d).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let t1 = fmt_ts(chrono::Duration::minutes(25));
+    let t2 = fmt_ts(chrono::Duration::minutes(20));
+    let t3 = fmt_ts(chrono::Duration::minutes(15));
+    let t4 = fmt_ts(chrono::Duration::minutes(10));
+    let t_orch = fmt_ts(chrono::Duration::hours(3));
     let base_payload = json!({
         "boutKey": "sb_coding_1",
         "track": "coding",
@@ -2959,6 +2963,7 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
         },
         "winner": "champion",
         "judgeModel": "gemini-4-carbon",
+        "clientSentAt": t_orch,
         "queueOnly": true
     })
     .to_string();
@@ -2986,6 +2991,32 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
     let rec_json: Value = serde_json::from_slice(&rec_out.stdout).unwrap();
     assert_eq!(rec_json["spooled"], true);
 
+    // 4b. Queue a judgment update for sb_coding_1 with omitted occurredAt; flushing must preserve initial_occurred_at.
+    let mut queued_update = judged_payload.clone();
+    queued_update["judgeRationale"] = json!("Updated rationale via offline spool");
+    queued_update["clientSentAt"] = json!(t4);
+    queued_update["queueOnly"] = json!(true);
+    let upd_out = Command::new(mcp_bin)
+        .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
+        .env_remove("MCP_APP_URL")
+        .env_remove("MCP_APP_TOKEN")
+        .args([
+            "call",
+            "record_shadow_bout",
+            "--input",
+            &queued_update.to_string(),
+            "--config",
+        ])
+        .arg(&cfg_path)
+        .output()
+        .await
+        .expect("mcp record_shadow_bout queued update");
+    assert!(
+        upd_out.status.success(),
+        "record_shadow_bout update failed: {}",
+        String::from_utf8_lossy(&upd_out.stderr)
+    );
+
     let flush_out = Command::new(mcp_bin)
         .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
         .env_remove("MCP_APP_URL")
@@ -2997,9 +3028,32 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
         .expect("mcp flush_spool");
     assert!(flush_out.status.success());
     let flush_json: Value = serde_json::from_slice(&flush_out.stdout).unwrap();
-    assert_eq!(flush_json["flushed"], 1);
+    assert_eq!(flush_json["flushed"], 2);
 
-    // 5. Verify leaderboard filters by track and championSource via MCP CLI.
+    let coding_lb_after_spool: Value = client
+        .get(format!(
+            "{base_url}/api/shadow-leaderboard?days=90&track=coding"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        coding_lb_after_spool["recentBouts"][0]["occurredAt"]
+            .as_str()
+            .unwrap(),
+        initial_occurred_at
+    );
+    assert_eq!(
+        coding_lb_after_spool["recentBouts"][0]["judgeRationale"]
+            .as_str()
+            .unwrap(),
+        "Updated rationale via offline spool"
+    );
+
+    // 5. Verify leaderboard filters by track and championSource via MCP CLI, and that new offline bout kept clientSentAt as occurredAt.
     let lb_out = Command::new(mcp_bin)
         .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
         .env_remove("MCP_APP_URL")
@@ -3021,6 +3075,7 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
     assert_eq!(lb["judgedBouts"], 1);
     assert_eq!(lb["pairs"][0]["aWins"], 1);
     assert_eq!(lb["recentBouts"][0]["boutKey"], "sb_orch_1");
+    assert_eq!(lb["recentBouts"][0]["occurredAt"].as_str().unwrap(), t_orch);
 
     tdb.teardown().await;
 }
