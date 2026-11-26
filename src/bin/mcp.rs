@@ -9,9 +9,10 @@ use std::time::Duration;
 use app::apiclient::{APP_SLUG, ApiClient, ClientConfig, mint_token_via_login};
 use app::arena::{
     BackfillArgs, CodingLeaderboardQuery, CodingRunInput, LeaderboardQuery, OverrideCandidateInput,
-    OverrideCodingRunInput, RecordRunInput, RosterSlotInput, SelectPanelInput, SpoolScope,
-    StartTrialInput, StringEnum, VALID_HUMAN_OVERRIDES, VALID_SKILLS, VALID_TRIAL_DECISIONS,
-    flush_spool, run_backfill, submit_or_spool_coding_run, submit_or_spool_run,
+    OverrideCodingRunInput, RecordRunInput, RosterSlotInput, SelectPanelInput, ShadowBoutInput,
+    ShadowLeaderboardQuery, SpoolScope, StartTrialInput, StringEnum, VALID_HUMAN_OVERRIDES,
+    VALID_SKILLS, VALID_TRIAL_DECISIONS, flush_spool, run_backfill, submit_or_spool_coding_run,
+    submit_or_spool_run, submit_or_spool_shadow_bout,
 };
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -319,6 +320,36 @@ impl AppMcp {
     }
 
     #[tool(
+        description = "Record a paired Champion vs Challenger coding or orchestration shadow bout idempotently, spooling locally as a .bout file if unreachable."
+    )]
+    async fn record_shadow_bout(
+        &self,
+        Parameters(input): Parameters<ShadowBoutInput>,
+    ) -> Result<CallToolResult, McpError> {
+        json_tool_result(submit_or_spool_shadow_bout(&self.client, &self.spool_scope, input).await)
+    }
+
+    #[tool(
+        description = "Get paired coding and orchestration shadow bout scorecards, head-to-head pair records, and recent bouts."
+    )]
+    async fn get_shadow_leaderboard(
+        &self,
+        Parameters(filter): Parameters<ShadowLeaderboardQuery>,
+    ) -> Result<CallToolResult, McpError> {
+        let _ = tokio::time::timeout(
+            Duration::from_millis(1500),
+            flush_spool(&self.client, &self.spool_scope),
+        )
+        .await;
+        json_tool_result(
+            self.client
+                .get_shadow_leaderboard(&filter)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    }
+
+    #[tool(
         description = "Scan local ~/.copilot/session-state events.jsonl logs and backfill historical skill runs idempotently."
     )]
     async fn backfill_sessions(
@@ -383,6 +414,15 @@ impl AppMcp {
                 let filter: CodingLeaderboardQuery =
                     serde_json::from_str(json_str).map_err(parse_err)?;
                 self.get_coding_leaderboard(Parameters(filter)).await
+            }
+            "record_shadow_bout" => {
+                let input: ShadowBoutInput = serde_json::from_str(json_str).map_err(parse_err)?;
+                self.record_shadow_bout(Parameters(input)).await
+            }
+            "get_shadow_leaderboard" => {
+                let filter: ShadowLeaderboardQuery =
+                    serde_json::from_str(json_str).map_err(parse_err)?;
+                self.get_shadow_leaderboard(Parameters(filter)).await
             }
             "backfill_sessions" => {
                 let args: BackfillArgs = serde_json::from_str(json_str).map_err(parse_err)?;

@@ -953,6 +953,189 @@
         ]
       }
     },
+    "/api/shadow-bouts": {
+      "post": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "record_shadow_bout_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShadowBoutInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded paired Champion vs Challenger shadow bout idempotently by boutKey",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedShadowBoutOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid shadow bout payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
+    "/api/shadow-leaderboard": {
+      "get": {
+        "tags": [
+          "arena"
+        ],
+        "operationId": "get_shadow_leaderboard_handler",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Lookback window in days (1..=3650, defaults to 90).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "track",
+            "in": "query",
+            "description": "Optional track filter: coding or orchestration.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "championSource",
+            "in": "query",
+            "description": "Optional champion source filter: headless or existing_ref.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "description": "Optional owner/repo filter.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Optional RFC3339 lower bound timestamp (overrides days).",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Optional RFC3339 upper bound timestamp.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paired coding and orchestration shadow bout scorecards, head-to-head pairs, and recent bouts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShadowLeaderboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerToken": []
+          }
+        ]
+      }
+    },
     "/api/tokens": {
       "get": {
         "tags": [
@@ -2758,6 +2941,30 @@
           }
         }
       },
+      "RecordedShadowBoutOutput": {
+        "type": "object",
+        "required": [
+          "boutId",
+          "boutKey",
+          "winner",
+          "spooled"
+        ],
+        "properties": {
+          "boutId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "boutKey": {
+            "type": "string"
+          },
+          "spooled": {
+            "type": "boolean"
+          },
+          "winner": {
+            "type": "string"
+          }
+        }
+      },
       "RegisterRequest": {
         "type": "object",
         "required": [
@@ -3113,6 +3320,564 @@
           "skill": {
             "type": "string",
             "description": "Skill to select a panel for: adversarial-review or plan-tournament."
+          }
+        }
+      },
+      "ShadowBoutInput": {
+        "type": "object",
+        "required": [
+          "boutKey",
+          "track",
+          "champion",
+          "challenger"
+        ],
+        "properties": {
+          "baseSha": {
+            "type": "string"
+          },
+          "boutKey": {
+            "type": "string",
+            "description": "Stable idempotency key for this paired shadow bout."
+          },
+          "challenger": {
+            "$ref": "#/components/schemas/ShadowBoutSideInput"
+          },
+          "champion": {
+            "$ref": "#/components/schemas/ShadowBoutSideInput"
+          },
+          "championHumanTurns": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of human steering turns on the Champion side (0 for headless)."
+          },
+          "championSource": {
+            "type": "string",
+            "description": "Whether Champion ran headlessly from baseSha or was imported from an existing ref/PR."
+          },
+          "clientSentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "judgeLineage": {
+            "type": "string"
+          },
+          "judgeModel": {
+            "type": "string"
+          },
+          "judgeRationale": {
+            "type": "string"
+          },
+          "judgedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "matrix": {
+            "$ref": "#/components/schemas/ShadowBoutMatrixInput"
+          },
+          "occurredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "promptSha256": {
+            "type": "string"
+          },
+          "queueOnly": {
+            "type": "boolean"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "taskKind": {
+            "type": "string"
+          },
+          "taskRef": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string",
+            "description": "Evaluation track: coding or orchestration."
+          },
+          "winner": {
+            "type": "string",
+            "description": "Blinded judgment winner: empty (unjudged), champion, challenger, tie, or both_failed."
+          }
+        }
+      },
+      "ShadowBoutMatrixInput": {
+        "type": "object",
+        "properties": {
+          "challengerImplChallengerTest": {
+            "type": "string"
+          },
+          "challengerImplChampionTest": {
+            "type": "string"
+          },
+          "championImplChallengerTest": {
+            "type": "string"
+          },
+          "championImplChampionTest": {
+            "type": "string"
+          }
+        }
+      },
+      "ShadowBoutSideInput": {
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "properties": {
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "filesChanged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lineage": {
+            "type": "string",
+            "description": "Optional lineage override (inferred from model prefix when omitted)."
+          },
+          "locAdded": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "locDeleted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "metrics": {
+            "description": "Extensible trace and usage metadata object."
+          },
+          "model": {
+            "type": "string",
+            "description": "Executed model ID for this side."
+          },
+          "nanoAiu": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total AI credits consumed in nano-AIU (1 AI credit = 1_000_000_000)."
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "premiumRequests": {
+            "type": "number",
+            "format": "double"
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Side execution status: ok, timeout, credit_cap, failed, or imported."
+          },
+          "subagentSpawns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "testsDelta": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "toolErrors": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "turnCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "usageAvailable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ShadowBoutSideView": {
+        "type": "object",
+        "required": [
+          "side",
+          "model",
+          "lineage",
+          "status",
+          "durationMs",
+          "locAdded",
+          "locDeleted",
+          "filesChanged",
+          "testsDelta",
+          "usageAvailable",
+          "nanoAiu",
+          "credits",
+          "premiumRequests",
+          "inputTokens",
+          "outputTokens",
+          "turnCount",
+          "subagentSpawns",
+          "toolErrors"
+        ],
+        "properties": {
+          "credits": {
+            "type": "number",
+            "format": "double"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "filesChanged": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "locAdded": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "locDeleted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "model": {
+            "type": "string"
+          },
+          "nanoAiu": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "premiumRequests": {
+            "type": "number",
+            "format": "double"
+          },
+          "reasoningEffort": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subagentSpawns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "testsDelta": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "toolErrors": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "turnCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "usageAvailable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ShadowBoutView": {
+        "type": "object",
+        "required": [
+          "id",
+          "boutKey",
+          "track",
+          "championSource",
+          "championHumanTurns",
+          "repo",
+          "baseSha",
+          "taskRef",
+          "taskKind",
+          "matrix",
+          "winner",
+          "judgeModel",
+          "judgeLineage",
+          "judgeRationale",
+          "occurredAt",
+          "champion",
+          "challenger"
+        ],
+        "properties": {
+          "baseSha": {
+            "type": "string"
+          },
+          "boutKey": {
+            "type": "string"
+          },
+          "challenger": {
+            "$ref": "#/components/schemas/ShadowBoutSideView"
+          },
+          "champion": {
+            "$ref": "#/components/schemas/ShadowBoutSideView"
+          },
+          "championHumanTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "championSource": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "judgeLineage": {
+            "type": "string"
+          },
+          "judgeModel": {
+            "type": "string"
+          },
+          "judgeRationale": {
+            "type": "string"
+          },
+          "judgedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "matrix": {
+            "$ref": "#/components/schemas/ShadowBoutMatrixInput"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "taskKind": {
+            "type": "string"
+          },
+          "taskRef": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string"
+          },
+          "winner": {
+            "type": "string"
+          }
+        }
+      },
+      "ShadowLeaderboard": {
+        "type": "object",
+        "required": [
+          "windowDays",
+          "totalBouts",
+          "judgedBouts",
+          "models",
+          "pairs",
+          "recentBouts"
+        ],
+        "properties": {
+          "judgedBouts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShadowModelScorecard"
+            }
+          },
+          "pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShadowPairwiseRecord"
+            }
+          },
+          "recentBouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShadowBoutView"
+            }
+          },
+          "totalBouts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "windowDays": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ShadowModelScorecard": {
+        "type": "object",
+        "required": [
+          "track",
+          "model",
+          "lineage",
+          "bouts",
+          "judgedBouts",
+          "wins",
+          "losses",
+          "ties",
+          "bothFailed",
+          "winRate",
+          "ownTestPassRate",
+          "medianCredits",
+          "p50DurationMs",
+          "avgLocChurn",
+          "avgTurns",
+          "avgSubagentSpawns",
+          "avgToolErrors"
+        ],
+        "properties": {
+          "avgLocChurn": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "avgSubagentSpawns": {
+            "type": "number",
+            "format": "double"
+          },
+          "avgToolErrors": {
+            "type": "number",
+            "format": "double"
+          },
+          "avgTurns": {
+            "type": "number",
+            "format": "double"
+          },
+          "bothFailed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bouts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "judgedBouts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lineage": {
+            "type": "string"
+          },
+          "losses": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "medianCredits": {
+            "type": "number",
+            "format": "double"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ownTestPassRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "p50DurationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reasoningEffort": {
+            "type": "string"
+          },
+          "ties": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "track": {
+            "type": "string"
+          },
+          "winRate": {
+            "type": "number",
+            "format": "double"
+          },
+          "wins": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ShadowPairwiseRecord": {
+        "type": "object",
+        "required": [
+          "track",
+          "modelA",
+          "modelB",
+          "bouts",
+          "aWins",
+          "bWins",
+          "ties",
+          "bothFailed"
+        ],
+        "properties": {
+          "aWins": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bWins": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bothFailed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bouts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "effortA": {
+            "type": "string"
+          },
+          "effortB": {
+            "type": "string"
+          },
+          "modelA": {
+            "type": "string"
+          },
+          "modelB": {
+            "type": "string"
+          },
+          "ties": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "track": {
+            "type": "string"
           }
         }
       },

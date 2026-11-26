@@ -46,6 +46,19 @@ pub struct BackfillSummary {
     pub sample_run_keys: Vec<String>,
 }
 
+fn is_shadow_bout_session(session_dir: &Path) -> bool {
+    let Ok(raw) = fs::read_to_string(session_dir.join("workspace.yaml")) else {
+        return false;
+    };
+    raw.lines().any(|line| {
+        let Some(rest) = line.trim().strip_prefix("name:") else {
+            return false;
+        };
+        let val = rest.trim().trim_matches(|c| c == '"' || c == '\'');
+        val.starts_with("shadow-bout:")
+    })
+}
+
 pub async fn run_backfill(
     client: &ApiClient,
     spool_scope: &SpoolScope,
@@ -84,7 +97,7 @@ pub async fn run_backfill(
     let mut session_dirs: Vec<(String, PathBuf)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        if !path.is_dir() || is_shadow_bout_session(&path) {
             continue;
         }
         let events_path = path.join("events.jsonl");
@@ -1596,5 +1609,25 @@ mod tests {
         let r3 = &runs[2];
         assert_eq!(r3.host_model, "gemini-4-neon");
         assert_eq!(r3.host_reasoning_effort, "");
+    }
+
+    #[test]
+    fn detects_and_skips_shadow_bout_sessions_from_workspace_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_shadow_bout_session(dir.path()));
+
+        fs::write(
+            dir.path().join("workspace.yaml"),
+            "id: abc\nname: regular-session\n",
+        )
+        .unwrap();
+        assert!(!is_shadow_bout_session(dir.path()));
+
+        fs::write(
+            dir.path().join("workspace.yaml"),
+            "id: abc\nname: \"shadow-bout:sb_123:challenger\"\n",
+        )
+        .unwrap();
+        assert!(is_shadow_bout_session(dir.path()));
     }
 }

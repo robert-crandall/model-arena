@@ -37,7 +37,7 @@ pub const VALID_TRIAL_DECISIONS: [&str; 2] = ["promote", "retire"];
 pub const VALID_HUMAN_OVERRIDES: [&str; 3] = ["confirmed", "overturned", "clear"];
 
 /// OpenAPI schema type matching `VALID_REASONING_EFFORTS` for utoipa `ToSchema` input fields.
-struct ReasoningEffortSchema;
+pub(crate) struct ReasoningEffortSchema;
 
 impl utoipa::PartialSchema for ReasoningEffortSchema {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {

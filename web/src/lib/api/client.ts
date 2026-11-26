@@ -29,5 +29,9 @@ export type CodingLeaderboard = components["schemas"]["CodingLeaderboard"];
 export type CodingModelProfile = components["schemas"]["CodingModelProfile"];
 export type CodingSliceCell = components["schemas"]["CodingSliceCell"];
 export type CodingRunRecord = components["schemas"]["CodingRunRecord"];
+export type ShadowLeaderboard = components["schemas"]["ShadowLeaderboard"];
+export type ShadowModelScorecard = components["schemas"]["ShadowModelScorecard"];
+export type ShadowPairwiseRecord = components["schemas"]["ShadowPairwiseRecord"];
+export type ShadowBoutView = components["schemas"]["ShadowBoutView"];
 
 

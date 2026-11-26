@@ -14,6 +14,10 @@ import {
   type CreatedApiToken,
   type Leaderboard,
   type ModelScorecard,
+  type ShadowBoutView,
+  type ShadowLeaderboard,
+  type ShadowModelScorecard,
+  type ShadowPairwiseRecord,
   type User,
 } from "../lib/api/client";
 import { useAuth } from "../lib/auth";
@@ -25,8 +29,11 @@ type ArenaTab =
   | "review"
   | "tournament"
   | "coding"
+  | "shadow"
   | "trials"
   | "history";
+
+type ShadowTrackFilter = "all" | "coding" | "orchestration";
 
 function formatPct(val: number): string {
   return `${(val * 100).toFixed(1)}%`;
@@ -59,6 +66,11 @@ export function AppShell(props: { user: User }) {
   const [codingBoard, setCodingBoard] = createSignal<CodingLeaderboard | null>(
     null,
   );
+  const [shadowBoard, setShadowBoard] = createSignal<ShadowLeaderboard | null>(
+    null,
+  );
+  const [shadowTrack, setShadowTrack] = createSignal<ShadowTrackFilter>("all");
+  const [shadowError, setShadowError] = createSignal<string | null>(null);
 
 
   const [tokensLoaded, setTokensLoaded] = createSignal(false);
@@ -77,9 +89,10 @@ export function AppShell(props: { user: User }) {
     const seq = ++arenaLoadSeq;
     setArenaLoading(true);
     setArenaError(null);
+    setShadowError(null);
     const trimmedRepo = repo.trim() || undefined;
     try {
-      const [lbRes, codingRes] = await Promise.all([
+      const [lbRes, codingRes, shadowRes] = await Promise.all([
         api.GET("/api/leaderboard", {
           params: {
             query: {
@@ -96,11 +109,22 @@ export function AppShell(props: { user: User }) {
             },
           },
         }),
+        api
+          .GET("/api/shadow-leaderboard", {
+            params: {
+              query: {
+                days,
+                repo: trimmedRepo,
+              },
+            },
+          })
+          .catch(() => ({ data: undefined, error: { error: "Could not load shadow bouts." } })),
       ]);
       if (seq !== arenaLoadSeq) return;
       if (lbRes.error || !lbRes.data) {
         setLeaderboard(null);
         setCodingBoard(null);
+        setShadowBoard(null);
         setArenaError(
           lbRes.error?.error ?? "Could not load leaderboard telemetry.",
         );
@@ -109,6 +133,7 @@ export function AppShell(props: { user: User }) {
       if (codingRes.error || !codingRes.data) {
         setLeaderboard(null);
         setCodingBoard(null);
+        setShadowBoard(null);
         setArenaError(
           codingRes.error?.error ??
             "Could not load coding profile leaderboard.",
@@ -117,10 +142,19 @@ export function AppShell(props: { user: User }) {
       }
       setLeaderboard(lbRes.data);
       setCodingBoard(codingRes.data);
+      if (shadowRes.error || !shadowRes.data) {
+        setShadowBoard(null);
+        setShadowError(
+          shadowRes.error?.error ?? "Could not load shadow bout telemetry.",
+        );
+      } else {
+        setShadowBoard(shadowRes.data);
+      }
     } catch {
       if (seq !== arenaLoadSeq) return;
       setLeaderboard(null);
       setCodingBoard(null);
+      setShadowBoard(null);
       setArenaError("Could not reach the server to load arena telemetry.");
     } finally {
       if (seq === arenaLoadSeq) {
@@ -144,6 +178,27 @@ export function AppShell(props: { user: User }) {
       (c: ModelScorecard) => c.plannerRuns > 0 || c.criticRuns > 0,
     ),
   );
+
+  const shadowModels = createMemo<ShadowModelScorecard[]>(() => {
+    const track = shadowTrack();
+    return (shadowBoard()?.models ?? []).filter(
+      (m) => track === "all" || m.track === track,
+    );
+  });
+
+  const shadowPairs = createMemo<ShadowPairwiseRecord[]>(() => {
+    const track = shadowTrack();
+    return (shadowBoard()?.pairs ?? []).filter(
+      (p) => track === "all" || p.track === track,
+    );
+  });
+
+  const shadowRecentBouts = createMemo<ShadowBoutView[]>(() => {
+    const track = shadowTrack();
+    return (shadowBoard()?.recentBouts ?? []).filter(
+      (b) => track === "all" || b.track === track,
+    );
+  });
 
 
   async function handleLogout() {
@@ -363,6 +418,12 @@ export function AppShell(props: { user: User }) {
                     {codingBoard()?.totalRuns ?? 0}
                   </strong>
                 </div>
+                <div class="kpi-pill">
+                  <span class="kpi-label">Shadow bouts</span>
+                  <strong class="kpi-value">
+                    {shadowBoard()?.totalBouts ?? 0}
+                  </strong>
+                </div>
               </div>
             )}
           </Show>
@@ -409,6 +470,14 @@ export function AppShell(props: { user: User }) {
               onClick={() => setActiveTab("coding")}
             >
               Coding &amp; PRs
+            </button>
+            <button
+              type="button"
+              class={["tab-btn", { active: activeTab() === "shadow" }]}
+              aria-pressed={activeTab() === "shadow" ? "true" : "false"}
+              onClick={() => setActiveTab("shadow")}
+            >
+              Shadow Bouts
             </button>
             <button
               type="button"
@@ -617,6 +686,223 @@ export function AppShell(props: { user: User }) {
                               <td>
                                 {formatSeconds(card.p50TimeToMergeSec)} /{" "}
                                 {formatSeconds(card.p90TimeToMergeSec)}
+                              </td>
+                            </tr>
+                          )}
+                        </For>
+                      </tbody>
+                    </table>
+                  </div>
+                </Show>
+              </div>
+            </Match>
+
+            <Match when={activeTab() === "shadow"}>
+              <div class="arena-panel">
+                <div class="arena-hero-top">
+                  <div>
+                    <h2>Paired shadow bouts (coding &amp; orchestration)</h2>
+                    <p class="field-hint">
+                      Head-to-head Champion vs Challenger runs on the exact same
+                      base commit and prompt. Recorded via{" "}
+                      <code>shadow-bout</code> and{" "}
+                      <code>model-arena-rust-mcp</code>.
+                    </p>
+                  </div>
+                  <div class="arena-tabs" role="group" aria-label="Shadow bout track">
+                    <button
+                      type="button"
+                      class={["tab-btn", { active: shadowTrack() === "all" }]}
+                      onClick={() => setShadowTrack("all")}
+                    >
+                      All tracks
+                    </button>
+                    <button
+                      type="button"
+                      class={["tab-btn", { active: shadowTrack() === "coding" }]}
+                      onClick={() => setShadowTrack("coding")}
+                    >
+                      Coding
+                    </button>
+                    <button
+                      type="button"
+                      class={[
+                        "tab-btn",
+                        { active: shadowTrack() === "orchestration" },
+                      ]}
+                      onClick={() => setShadowTrack("orchestration")}
+                    >
+                      Orchestration
+                    </button>
+                  </div>
+                </div>
+
+                <Show when={shadowError()}>
+                  {(msg) => (
+                    <div class="alert-error" role="alert">
+                      {msg()}
+                    </div>
+                  )}
+                </Show>
+
+                <Show
+                  when={shadowModels().length > 0}
+                  fallback={
+                    <p class="field-hint">
+                      No shadow bouts recorded for this filter yet.
+                    </p>
+                  }
+                >
+                  <h3>Model scorecards</h3>
+                  <div class="table-scroll">
+                    <table class="arena-table">
+                      <thead>
+                        <tr>
+                          <th>Track</th>
+                          <th>Model</th>
+                          <th>Lineage</th>
+                          <th>Bouts</th>
+                          <th>W-L-T</th>
+                          <th>Win Rate</th>
+                          <th>Own Tests</th>
+                          <th>Med Credits</th>
+                          <th>p50 Time</th>
+                          <th>Avg Subagents</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <For each={shadowModels()}>
+                          {(card) => (
+                            <tr>
+                              <td>{card.track}</td>
+                              <td>
+                                <code>
+                                  {formatModelLabel(
+                                    card.model,
+                                    card.reasoningEffort,
+                                  )}
+                                </code>
+                              </td>
+                              <td>{card.lineage}</td>
+                              <td>{card.bouts}</td>
+                              <td>
+                                {card.wins}-{card.losses}-{card.ties}
+                                {card.bothFailed > 0
+                                  ? ` (${card.bothFailed}F)`
+                                  : ""}
+                              </td>
+                              <td>{formatPct(card.winRate)}</td>
+                              <td>{formatPct(card.ownTestPassRate)}</td>
+                              <td>
+                                {card.medianCredits > 0
+                                  ? card.medianCredits.toFixed(2)
+                                  : "—"}
+                              </td>
+                              <td>{formatDurationMs(card.p50DurationMs)}</td>
+                              <td>{card.avgSubagentSpawns.toFixed(1)}</td>
+                            </tr>
+                          )}
+                        </For>
+                      </tbody>
+                    </table>
+                  </div>
+                </Show>
+
+                <Show when={shadowPairs().length > 0}>
+                  <h3>Head-to-head pairings</h3>
+                  <div class="table-scroll">
+                    <table class="arena-table">
+                      <thead>
+                        <tr>
+                          <th>Track</th>
+                          <th>Model A</th>
+                          <th>Model B</th>
+                          <th>Bouts</th>
+                          <th>A Wins</th>
+                          <th>B Wins</th>
+                          <th>Ties</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <For each={shadowPairs()}>
+                          {(pair) => (
+                            <tr>
+                              <td>{pair.track}</td>
+                              <td>
+                                <code>
+                                  {formatModelLabel(pair.modelA, pair.effortA)}
+                                </code>
+                              </td>
+                              <td>
+                                <code>
+                                  {formatModelLabel(pair.modelB, pair.effortB)}
+                                </code>
+                              </td>
+                              <td>{pair.bouts}</td>
+                              <td>{pair.aWins}</td>
+                              <td>{pair.bWins}</td>
+                              <td>{pair.ties}</td>
+                            </tr>
+                          )}
+                        </For>
+                      </tbody>
+                    </table>
+                  </div>
+                </Show>
+
+                <Show when={shadowRecentBouts().length > 0}>
+                  <h3>Recent shadow bouts</h3>
+                  <div class="table-scroll">
+                    <table class="arena-table">
+                      <thead>
+                        <tr>
+                          <th>Bout</th>
+                          <th>Track</th>
+                          <th>Source</th>
+                          <th>Champion vs Challenger</th>
+                          <th>Own Tests</th>
+                          <th>Winner</th>
+                          <th>Credits (Ch / Cl)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <For each={shadowRecentBouts()}>
+                          {(bout) => (
+                            <tr>
+                              <td>
+                                <code>{bout.boutKey}</code>
+                                {bout.taskRef ? ` (${bout.taskRef})` : ""}
+                              </td>
+                              <td>{bout.track}</td>
+                              <td>{bout.championSource}</td>
+                              <td>
+                                <code>
+                                  {formatModelLabel(
+                                    bout.champion.model,
+                                    bout.champion.reasoningEffort,
+                                  )}
+                                </code>{" "}
+                                vs{" "}
+                                <code>
+                                  {formatModelLabel(
+                                    bout.challenger.model,
+                                    bout.challenger.reasoningEffort,
+                                  )}
+                                </code>
+                              </td>
+                              <td>
+                                {bout.matrix.championImplChampionTest} /{" "}
+                                {bout.matrix.challengerImplChallengerTest}
+                              </td>
+                              <td>{bout.winner || "pending"}</td>
+                              <td>
+                                {bout.champion.usageAvailable
+                                  ? bout.champion.credits.toFixed(2)
+                                  : "—"}{" "}
+                                /{" "}
+                                {bout.challenger.usageAvailable
+                                  ? bout.challenger.credits.toFixed(2)
+                                  : "—"}
                               </td>
                             </tr>
                           )}

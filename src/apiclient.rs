@@ -14,7 +14,8 @@ use crate::arena::{
     CodingLeaderboard, CodingLeaderboardQuery, CodingRunInput, DecideTrialInput, Leaderboard,
     LeaderboardQuery, OverrideCandidateInput, OverrideCandidateResponse, OverrideCodingRunInput,
     OverrideCodingRunResponse, PanelSelection, RecordRunInput, RecordedCodingRunOutput,
-    RecordedRunOutput, ReplaceRosterRequest, RosterListResponse, RosterSlotInput, SelectPanelInput,
+    RecordedRunOutput, RecordedShadowBoutOutput, ReplaceRosterRequest, RosterListResponse,
+    RosterSlotInput, SelectPanelInput, ShadowBoutInput, ShadowLeaderboard, ShadowLeaderboardQuery,
     StartTrialInput, Trial, TrialsListResponse,
 };
 use crate::auth::{CreatedApiToken, User};
@@ -500,6 +501,63 @@ impl ApiClient {
         }
         let req = self.http.get(url);
         self.send_json(req, "/api/coding-leaderboard").await
+    }
+
+    pub async fn record_shadow_bout(
+        &self,
+        input: &ShadowBoutInput,
+    ) -> Result<RecordedShadowBoutOutput, ApiClientError> {
+        let req = self
+            .http
+            .post(format!("{}/api/shadow-bouts", self.base_url))
+            .json(input);
+        self.send_json(req, "/api/shadow-bouts").await
+    }
+
+    pub async fn get_shadow_leaderboard(
+        &self,
+        query: &ShadowLeaderboardQuery,
+    ) -> Result<ShadowLeaderboard, ApiClientError> {
+        let mut url = Url::parse(&format!("{}/api/shadow-leaderboard", self.base_url))
+            .map_err(|err| ApiClientError::Transport(err.to_string()))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            if let Some(days) = query.days {
+                pairs.append_pair("days", &days.to_string());
+            }
+            if let Some(track) = query
+                .track
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("track", track);
+            }
+            if let Some(source) = query
+                .champion_source
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("championSource", source);
+            }
+            if let Some(repo) = query
+                .repo
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                pairs.append_pair("repo", repo);
+            }
+            if let Some(from) = query.from {
+                pairs.append_pair("from", &from.to_rfc3339());
+            }
+            if let Some(to) = query.to {
+                pairs.append_pair("to", &to.to_rfc3339());
+            }
+        }
+        let req = self.http.get(url);
+        self.send_json(req, "/api/shadow-leaderboard").await
     }
 }
 

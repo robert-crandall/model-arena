@@ -6,6 +6,7 @@ import type {
   ApiToken,
   CodingLeaderboard,
   Leaderboard,
+  ShadowLeaderboard,
   User,
 } from "./lib/api/client";
 
@@ -53,6 +54,7 @@ describe("Model Arena SPA foundation", () => {
   let failLogoutStatus: boolean;
   let leaderboardData: Leaderboard;
   let codingLeaderboardData: CodingLeaderboard;
+  let shadowLeaderboardData: ShadowLeaderboard;
   let dispose: (() => void) | undefined;
 
   beforeEach(() => {
@@ -82,6 +84,14 @@ describe("Model Arena SPA foundation", () => {
       models: [],
       slices: [],
       recentRuns: [],
+    };
+    shadowLeaderboardData = {
+      windowDays: 90,
+      totalBouts: 0,
+      judgedBouts: 0,
+      models: [],
+      pairs: [],
+      recentBouts: [],
     };
 
 
@@ -216,6 +226,10 @@ describe("Model Arena SPA foundation", () => {
 
       if (url.pathname === "/api/coding-leaderboard" && method === "GET") {
         return jsonResponse(codingLeaderboardData);
+      }
+
+      if (url.pathname === "/api/shadow-leaderboard" && method === "GET") {
+        return jsonResponse(shadowLeaderboardData);
       }
 
       return jsonResponse({ error: `unhandled ${method} ${url.pathname}` }, 404);
@@ -759,6 +773,113 @@ describe("Model Arena SPA foundation", () => {
       slices: [],
       recentRuns: [],
     };
+    shadowLeaderboardData = {
+      windowDays: 90,
+      totalBouts: 1,
+      judgedBouts: 1,
+      models: [
+        {
+          track: "orchestration",
+          model: "gpt-6.2-sol",
+          reasoningEffort: "high",
+          lineage: "openai",
+          bouts: 1,
+          judgedBouts: 1,
+          wins: 1,
+          losses: 0,
+          ties: 0,
+          bothFailed: 0,
+          winRate: 1,
+          ownTestPassRate: 1,
+          medianCredits: 2.5,
+          p50DurationMs: 45000,
+          avgLocChurn: 60,
+          avgTurns: 4,
+          avgSubagentSpawns: 3,
+          avgToolErrors: 0,
+        },
+      ],
+      pairs: [
+        {
+          track: "orchestration",
+          modelA: "claude-opus-5.5",
+          effortA: "high",
+          modelB: "gpt-6.2-sol",
+          effortB: "high",
+          bouts: 1,
+          aWins: 0,
+          bWins: 1,
+          ties: 0,
+          bothFailed: 0,
+        },
+      ],
+      recentBouts: [
+        {
+          id: 1,
+          boutKey: "sb_orch_demo",
+          track: "orchestration",
+          championSource: "headless",
+          championHumanTurns: 0,
+          repo: "robert-crandall/demo",
+          baseSha: "abc123",
+          taskRef: "PR #9",
+          taskKind: "feature",
+          matrix: {
+            championImplChampionTest: "pass",
+            challengerImplChallengerTest: "pass",
+            championImplChallengerTest: "skipped",
+            challengerImplChampionTest: "skipped",
+          },
+          winner: "challenger",
+          judgeModel: "gemini-4-carbon",
+          judgeLineage: "google",
+          judgeRationale: "Fewer subagent retries",
+          occurredAt: "2026-11-26T00:00:00Z",
+          champion: {
+            side: "champion",
+            model: "claude-opus-5.5",
+            reasoningEffort: "high",
+            lineage: "anthropic",
+            status: "ok",
+            durationMs: 60000,
+            locAdded: 50,
+            locDeleted: 10,
+            filesChanged: 2,
+            testsDelta: 1,
+            usageAvailable: true,
+            nanoAiu: 4000000000,
+            credits: 4,
+            premiumRequests: 3,
+            inputTokens: 10000,
+            outputTokens: 1200,
+            turnCount: 5,
+            subagentSpawns: 4,
+            toolErrors: 1,
+          },
+          challenger: {
+            side: "challenger",
+            model: "gpt-6.2-sol",
+            reasoningEffort: "high",
+            lineage: "openai",
+            status: "ok",
+            durationMs: 45000,
+            locAdded: 45,
+            locDeleted: 15,
+            filesChanged: 2,
+            testsDelta: 1,
+            usageAvailable: true,
+            nanoAiu: 2500000000,
+            credits: 2.5,
+            premiumRequests: 2,
+            inputTokens: 8000,
+            outputTokens: 900,
+            turnCount: 4,
+            subagentSpawns: 3,
+            toolErrors: 0,
+          },
+        },
+      ],
+    };
 
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -798,6 +919,23 @@ describe("Model Arena SPA foundation", () => {
     expect(host.textContent).toContain("Single-model coding & PR profiles");
     expect(host.textContent).toContain("claude-opus-4.7 (high)");
     expect(host.textContent).toContain("3.0m / 4.0m");
+
+    const shadowTab = tabs.find((btn) =>
+      btn.textContent?.includes("Shadow Bouts"),
+    )!;
+    shadowTab.click();
+    flush();
+    expect(host.textContent).toContain("Paired shadow bouts (coding & orchestration)");
+    expect(host.textContent).toContain("sb_orch_demo");
+    expect(host.textContent).toContain("gpt-6.2-sol (high)");
+    expect(host.textContent).toContain("2.50");
+
+    const codingTrackBtn = Array.from(
+      host.querySelectorAll<HTMLButtonElement>(".arena-panel .tab-btn"),
+    ).find((btn) => btn.textContent?.trim() === "Coding")!;
+    codingTrackBtn.click();
+    flush();
+    expect(host.textContent).toContain("No shadow bouts recorded for this filter yet.");
 
     const trialsTab = tabs.find((btn) =>
       btn.textContent?.includes("Challenger Trials"),

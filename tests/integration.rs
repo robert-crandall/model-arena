@@ -2719,3 +2719,244 @@ async fn arena_reasoning_effort_trials_and_leaderboards_flow() {
 
     tdb.teardown().await;
 }
+
+#[tokio::test]
+async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
+    let Some(tdb) = TestDb::setup().await else {
+        eprintln!("skipping Postgres integration test (TEST_DATABASE_URL not set)");
+        return;
+    };
+    let base_url = spawn_in_process_server(tdb.pool.clone(), true).await;
+
+    let client = reqwest::Client::builder()
+        .cookie_store(true)
+        .build()
+        .expect("cookie client");
+
+    let reg = client
+        .post(format!("{base_url}/api/auth/register"))
+        .json(&json!({
+            "email": "shadow@example.com",
+            "password": "very-strong-passphrase",
+            "name": "Shadow Tester"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reg.status(), StatusCode::CREATED);
+
+    // 1. Record an unjudged coding shadow bout.
+    let t1 = "2026-11-26T10:00:00Z";
+    let t2 = "2026-11-26T10:05:00Z";
+    let t3 = "2026-11-26T10:10:00Z";
+    let base_payload = json!({
+        "boutKey": "sb_coding_1",
+        "track": "coding",
+        "championSource": "existing_ref",
+        "championHumanTurns": 2,
+        "repo": "robert-crandall/demo",
+        "baseSha": "1111111",
+        "taskRef": "PR #12",
+        "taskKind": "feature",
+        "promptSha256": "abc",
+        "champion": {
+            "model": "claude-opus-5.5",
+            "reasoningEffort": "high",
+            "status": "imported",
+            "durationMs": 42000,
+            "locAdded": 80,
+            "locDeleted": 10,
+            "filesChanged": 3,
+            "testsDelta": 2,
+            "usageAvailable": true,
+            "nanoAiu": 4_500_000_000_i64,
+            "premiumRequests": 3.0,
+            "turnCount": 4
+        },
+        "challenger": {
+            "model": "gpt-6.2-sol",
+            "reasoningEffort": "high",
+            "status": "ok",
+            "durationMs": 28000,
+            "locAdded": 55,
+            "locDeleted": 8,
+            "filesChanged": 2,
+            "testsDelta": 2,
+            "usageAvailable": true,
+            "nanoAiu": 2_200_000_000_i64,
+            "premiumRequests": 2.0,
+            "turnCount": 2
+        },
+        "matrix": {
+            "championImplChampionTest": "pass",
+            "challengerImplChallengerTest": "pass",
+            "championImplChallengerTest": "skipped",
+            "challengerImplChampionTest": "skipped"
+        },
+        "winner": "",
+        "clientSentAt": t1
+    });
+
+    let r1: Value = client
+        .post(format!("{base_url}/api/shadow-bouts"))
+        .json(&base_payload)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r1["boutKey"], "sb_coding_1");
+    assert_eq!(r1["winner"], "");
+
+    // 2. Submit blinded judgment via the same idempotent upsert endpoint.
+    let mut judged_payload = base_payload.clone();
+    judged_payload["winner"] = json!("challenger");
+    judged_payload["judgeModel"] = json!("gemini-4-carbon");
+    judged_payload["judgeRationale"] = json!("Smaller diff, fewer turns");
+    judged_payload["clientSentAt"] = json!(t2);
+    let r2: Value = client
+        .post(format!("{base_url}/api/shadow-bouts"))
+        .json(&judged_payload)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r2["boutId"], r1["boutId"]);
+    assert_eq!(r2["winner"], "challenger");
+
+    // 3. Replaying an unjudged payload (even with newer clientSentAt) must NOT wipe the recorded winner.
+    let mut unjudged_replay = base_payload.clone();
+    unjudged_replay["clientSentAt"] = json!(t3);
+    let r3: Value = client
+        .post(format!("{base_url}/api/shadow-bouts"))
+        .json(&unjudged_replay)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r3["winner"], "challenger");
+
+    // 4. Record an orchestration bout via MCP CLI queueOnly (.bout spool) and flush it.
+    let minted = mint_token_via_login(
+        &base_url,
+        "shadow@example.com",
+        "very-strong-passphrase",
+        "shadow-mcp-test",
+    )
+    .await
+    .expect("mint token");
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join("model-arena-rust.json");
+    let spool_root = tmp.path().join("spool");
+    ClientConfig {
+        app_url: base_url.clone(),
+        token: minted.token.clone(),
+    }
+    .write_atomic(&cfg_path)
+    .unwrap();
+
+    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-rust-mcp");
+    let orch_input = json!({
+        "boutKey": "sb_orch_1",
+        "track": "orchestration",
+        "championSource": "headless",
+        "repo": "robert-crandall/demo",
+        "baseSha": "2222222",
+        "champion": {
+            "model": "claude-opus-5.5",
+            "reasoningEffort": "high",
+            "status": "ok",
+            "durationMs": 90000,
+            "usageAvailable": true,
+            "nanoAiu": 6_000_000_000_i64,
+            "turnCount": 6,
+            "subagentSpawns": 3,
+            "toolErrors": 0
+        },
+        "challenger": {
+            "model": "gpt-6.2-sol",
+            "reasoningEffort": "high",
+            "status": "ok",
+            "durationMs": 75000,
+            "usageAvailable": true,
+            "nanoAiu": 4_000_000_000_i64,
+            "turnCount": 5,
+            "subagentSpawns": 2,
+            "toolErrors": 1
+        },
+        "matrix": {
+            "championImplChampionTest": "pass",
+            "challengerImplChallengerTest": "pass"
+        },
+        "winner": "champion",
+        "judgeModel": "gemini-4-carbon",
+        "queueOnly": true
+    })
+    .to_string();
+
+    let rec_out = Command::new(mcp_bin)
+        .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
+        .env_remove("MCP_APP_URL")
+        .env_remove("MCP_APP_TOKEN")
+        .args([
+            "call",
+            "record_shadow_bout",
+            "--input",
+            &orch_input,
+            "--config",
+        ])
+        .arg(&cfg_path)
+        .output()
+        .await
+        .expect("mcp record_shadow_bout");
+    assert!(
+        rec_out.status.success(),
+        "record_shadow_bout failed: {}",
+        String::from_utf8_lossy(&rec_out.stderr)
+    );
+    let rec_json: Value = serde_json::from_slice(&rec_out.stdout).unwrap();
+    assert_eq!(rec_json["spooled"], true);
+
+    let flush_out = Command::new(mcp_bin)
+        .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
+        .env_remove("MCP_APP_URL")
+        .env_remove("MCP_APP_TOKEN")
+        .args(["call", "flush_spool", "--input", "{}", "--config"])
+        .arg(&cfg_path)
+        .output()
+        .await
+        .expect("mcp flush_spool");
+    assert!(flush_out.status.success());
+    let flush_json: Value = serde_json::from_slice(&flush_out.stdout).unwrap();
+    assert_eq!(flush_json["flushed"], 1);
+
+    // 5. Verify leaderboard filters by track and championSource via MCP CLI.
+    let lb_out = Command::new(mcp_bin)
+        .env("MODEL_ARENA_SPOOL_DIR", &spool_root)
+        .env_remove("MCP_APP_URL")
+        .env_remove("MCP_APP_TOKEN")
+        .args([
+            "call",
+            "get_shadow_leaderboard",
+            "--input",
+            r#"{"track":"orchestration","championSource":"headless"}"#,
+            "--config",
+        ])
+        .arg(&cfg_path)
+        .output()
+        .await
+        .expect("mcp get_shadow_leaderboard");
+    assert!(lb_out.status.success());
+    let lb: Value = serde_json::from_slice(&lb_out.stdout).unwrap();
+    assert_eq!(lb["totalBouts"], 1);
+    assert_eq!(lb["judgedBouts"], 1);
+    assert_eq!(lb["pairs"][0]["aWins"], 1);
+    assert_eq!(lb["recentBouts"][0]["boutKey"], "sb_orch_1");
+
+    tdb.teardown().await;
+}
