@@ -11,9 +11,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::apiclient::{ApiClient, ClientConfig};
+use crate::apiclient::{ApiClient, ApiClientError, ClientConfig};
 use crate::arena::service::{
     validate_and_normalize_coding_run_input, validate_and_normalize_record_run_input,
+};
+use crate::arena::shadow::{
+    RecordedShadowBoutOutput, ShadowBoutInput, validate_and_normalize_shadow_bout_input,
 };
 use crate::arena::types::{
     CodingRunInput, RecordRunInput, RecordedCodingRunOutput, RecordedRunOutput, Trial,
@@ -317,7 +320,7 @@ impl SpoolScope {
         }
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.ends_with(".json") {
+            if !name.ends_with(".json") && !name.ends_with(".bout") {
                 continue;
             }
             let src_path = src_dir.join(&name);
@@ -325,6 +328,8 @@ impl SpoolScope {
             if dst_path.exists() {
                 let (stem, ext) = if let Some(s) = name.strip_suffix(".coding.json") {
                     (s, "coding.json")
+                } else if let Some(s) = name.strip_suffix(".bout") {
+                    (s, "bout")
                 } else {
                     (name.trim_end_matches(".json"), "json")
                 };
@@ -472,6 +477,38 @@ pub fn write_spool_coding_run(scope: &SpoolScope, mut input: CodingRunInput) -> 
     Ok(())
 }
 
+/// Spools shadow bouts with a `.bout` suffix (non-`.json`) so older running MCP binaries
+/// scanning `*.json` never treat them as unrecognized runs and quarantine them as `.corrupt`.
+pub fn write_spool_shadow_bout(
+    scope: &SpoolScope,
+    mut input: ShadowBoutInput,
+) -> Result<(), String> {
+    let dir = scope.active_spool_dir()?;
+    create_dir_0700(&dir)?;
+
+    let sent_at = input.client_sent_at.unwrap_or_else(Utc::now);
+    input.client_sent_at = Some(sent_at);
+    input.queue_only = false;
+
+    let sent_nanos = sent_at.timestamp_nanos_opt().unwrap_or(0);
+    let target = dir.join(spool_filename(&input.bout_key, sent_nanos, "bout"));
+    let raw = serde_json::to_vec(&input)
+        .map_err(|err| format!("failed to serialize spooled shadow bout: {err}"))?;
+
+    let tmp_path = dir.join(format!(
+        ".spool-bout-{}-{}.tmp",
+        std::process::id(),
+        SPOOL_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    write_new_0600(&tmp_path, &raw)?;
+    fs::rename(&tmp_path, &target).map_err(|err| {
+        let _ = fs::remove_file(&tmp_path);
+        format!("failed to commit spool file {}: {err}", target.display())
+    })?;
+    sync_dir(&dir);
+    Ok(())
+}
+
 fn restore_claim_without_overwrite(claim_path: &Path, full_path: &Path) {
     match fs::hard_link(claim_path, full_path) {
         Ok(()) => {
@@ -503,13 +540,20 @@ fn recover_stale_claims(dir: &Path) {
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let Some(idx) = name.find(".json.sending.") else {
+        let Some((base_end, suffix_start)) = name
+            .find(".json.sending.")
+            .map(|idx| (idx + ".json".len(), idx + ".json.sending.".len()))
+            .or_else(|| {
+                name.find(".bout.sending.")
+                    .map(|idx| (idx + ".bout".len(), idx + ".bout.sending.".len()))
+            })
+        else {
             continue;
         };
-        if idx == 0 {
+        if base_end <= ".bout".len() {
             continue;
         }
-        let suffix = &name[idx + ".json.sending.".len()..];
+        let suffix = &name[suffix_start..];
         let mut parts = suffix.split('.');
         let _pid = parts.next();
         let claim_nanos = parts
@@ -528,7 +572,7 @@ fn recover_stale_claims(dir: &Path) {
         if claim_nanos > stale_cutoff_nanos {
             continue;
         }
-        let base_name = &name[..idx + ".json".len()];
+        let base_name = &name[..base_end];
         restore_claim_without_overwrite(&dir.join(&name), &dir.join(base_name));
     }
 }
@@ -555,7 +599,7 @@ pub async fn flush_spool(client: &ApiClient, scope: &SpoolScope) -> FlushSummary
                 return None;
             }
             let name = e.file_name().to_string_lossy().to_string();
-            if name.ends_with(".json") && !name.starts_with('.') {
+            if (name.ends_with(".json") || name.ends_with(".bout")) && !name.starts_with('.') {
                 Some(name)
             } else {
                 None
@@ -585,8 +629,34 @@ pub async fn flush_spool(client: &ApiClient, scope: &SpoolScope) -> FlushSummary
             continue;
         };
 
+        let is_bout = name.ends_with(".bout");
         let is_coding = name.ends_with(".coding.json");
-        if is_coding {
+        if is_bout {
+            let Ok(bout) = serde_json::from_slice::<ShadowBoutInput>(&raw) else {
+                let _ = fs::rename(&claim_path, dir.join(format!("{name}.corrupt")));
+                continue;
+            };
+            match client.record_shadow_bout(&bout).await {
+                Ok(_) => {
+                    let _ = fs::remove_file(&claim_path);
+                    summary.flushed += 1;
+                }
+                Err(crate::apiclient::ApiClientError::Status { status: 404, .. }) => {
+                    // Older server without /api/shadow-bouts: keep .bout queued rather than rejecting it.
+                    restore_claim_without_overwrite(&claim_path, &full_path);
+                    summary.pending += 1;
+                }
+                Err(err) if err.is_permanent_client_rejection() => {
+                    let _ = fs::rename(&claim_path, dir.join(format!("{name}.rejected")));
+                    summary.rejected += 1;
+                }
+                Err(_) => {
+                    restore_claim_without_overwrite(&claim_path, &full_path);
+                    summary.pending += names.len() - i;
+                    return summary;
+                }
+            }
+        } else if is_coding {
             let Ok(coding_run) = serde_json::from_slice::<CodingRunInput>(&raw) else {
                 let _ = fs::rename(&claim_path, dir.join(format!("{name}.corrupt")));
                 continue;
@@ -715,6 +785,48 @@ pub async fn submit_or_spool_coding_run(
     }
 }
 
+pub async fn submit_or_spool_shadow_bout(
+    client: &ApiClient,
+    scope: &SpoolScope,
+    mut input: ShadowBoutInput,
+) -> Result<RecordedShadowBoutOutput, String> {
+    validate_and_normalize_shadow_bout_input(&mut input).map_err(|e| e.message)?;
+    if input.client_sent_at.is_none() {
+        input.client_sent_at = Some(Utc::now());
+    }
+
+    if input.queue_only {
+        write_spool_shadow_bout(scope, input.clone())
+            .map_err(|err| format!("local spool failed: {err}"))?;
+        return Ok(RecordedShadowBoutOutput {
+            bout_id: 0,
+            bout_key: input.bout_key,
+            winner: input.winner,
+            spooled: true,
+        });
+    }
+
+    let _ = tokio::time::timeout(Duration::from_millis(1500), flush_spool(client, scope)).await;
+
+    match client.record_shadow_bout(&input).await {
+        Ok(out) => Ok(out),
+        Err(err)
+            if err.is_transient_spoolable()
+                || matches!(err, ApiClientError::Status { status: 404, .. }) =>
+        {
+            write_spool_shadow_bout(scope, input.clone())
+                .map_err(|serr| format!("submit failed ({err}) and local spool failed: {serr}"))?;
+            Ok(RecordedShadowBoutOutput {
+                bout_id: 0,
+                bout_key: input.bout_key,
+                winner: input.winner,
+                spooled: true,
+            })
+        }
+        Err(err) => Err(err.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -837,5 +949,156 @@ mod tests {
             .collect();
         assert_eq!(migrated_names.len(), 2);
         assert!(migrated_names.iter().all(|n| n.ends_with(".coding.json")));
+    }
+
+    #[test]
+    fn shadow_bout_spool_uses_bout_suffix_and_recovers_stale_claims() {
+        use crate::arena::shadow::{ShadowBoutMatrixInput, ShadowBoutSideInput};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = ClientConfig {
+            app_url: "https://arena.example".to_string(),
+            token: "pat_bout_token".to_string(),
+        };
+        let scope = SpoolScope::with_base_dir(&cfg, Some(tmp.path().to_path_buf()));
+        let bout = ShadowBoutInput {
+            bout_key: "sb_spool_1".to_string(),
+            track: "coding".to_string(),
+            champion_source: "headless".to_string(),
+            champion_human_turns: 0,
+            repo: "robert-crandall/demo".to_string(),
+            base_sha: "abc123".to_string(),
+            task_ref: "PR #7".to_string(),
+            task_kind: "bugfix".to_string(),
+            prompt_sha256: "hash".to_string(),
+            champion: ShadowBoutSideInput {
+                model: "claude-opus-5.5".to_string(),
+                status: "ok".to_string(),
+                metrics: serde_json::json!({}),
+                ..Default::default()
+            },
+            challenger: ShadowBoutSideInput {
+                model: "gpt-6.2-sol".to_string(),
+                status: "ok".to_string(),
+                metrics: serde_json::json!({}),
+                ..Default::default()
+            },
+            matrix: ShadowBoutMatrixInput::default(),
+            winner: String::new(),
+            judge_model: String::new(),
+            judge_lineage: String::new(),
+            judge_rationale: String::new(),
+            judged_at: None,
+            occurred_at: None,
+            client_sent_at: None,
+            queue_only: true,
+        };
+        write_spool_shadow_bout(&scope, bout).unwrap();
+
+        let dir = scope.active_spool_dir().unwrap();
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names.len(), 1);
+        assert!(names[0].ends_with(".bout"));
+        assert!(!names[0].ends_with(".json"));
+
+        let original = dir.join(&names[0]);
+        let stored: ShadowBoutInput =
+            serde_json::from_slice(&fs::read(&original).unwrap()).unwrap();
+        assert!(stored.occurred_at.is_none());
+        assert!(stored.client_sent_at.is_some());
+
+        // Simulate a stale in-flight claim and verify recovery restores the .bout filename.
+        let stale_claim = dir.join(format!("{}.sending.99999.1.1", names[0]));
+        fs::rename(&original, &stale_claim).unwrap();
+        recover_stale_claims(&dir);
+        assert!(original.exists());
+        assert!(!stale_claim.exists());
+
+        // Verify fallback-to-verified migration preserves .bout files even on name collision.
+        let verified_user_id = Uuid::new_v4();
+        let verified_scope = user_scope_hash(&cfg.app_url, verified_user_id);
+        let verified_dir = scope.spool_base_dir().unwrap().join(&verified_scope);
+        create_dir_0700(&verified_dir).unwrap();
+        fs::write(verified_dir.join(&names[0]), b"{}").unwrap();
+        scope.record_verified_user(verified_user_id);
+
+        let migrated: Vec<String> = fs::read_dir(&verified_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with(".bout"))
+            .collect();
+        assert_eq!(migrated.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn submit_or_spool_shadow_bout_spools_on_404() {
+        use crate::arena::shadow::{ShadowBoutMatrixInput, ShadowBoutSideInput};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, axum::Router::new()).await.unwrap();
+        });
+
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = ClientConfig {
+            app_url: format!("http://{addr}"),
+            token: "pat_old_server".to_string(),
+        };
+        let client = ApiClient::new(&cfg).unwrap();
+        let scope = SpoolScope::with_base_dir(&cfg, Some(tmp.path().to_path_buf()));
+        let bout = ShadowBoutInput {
+            bout_key: "sb_404_1".to_string(),
+            track: "coding".to_string(),
+            champion_source: "headless".to_string(),
+            champion_human_turns: 0,
+            repo: "robert-crandall/demo".to_string(),
+            base_sha: "abc123".to_string(),
+            task_ref: "PR #9".to_string(),
+            task_kind: "feature".to_string(),
+            prompt_sha256: "hash".to_string(),
+            champion: ShadowBoutSideInput {
+                model: "claude-opus-5.5".to_string(),
+                status: "ok".to_string(),
+                metrics: serde_json::json!({}),
+                ..Default::default()
+            },
+            challenger: ShadowBoutSideInput {
+                model: "gpt-6.2-sol".to_string(),
+                status: "ok".to_string(),
+                metrics: serde_json::json!({}),
+                ..Default::default()
+            },
+            matrix: ShadowBoutMatrixInput::default(),
+            winner: String::new(),
+            judge_model: String::new(),
+            judge_lineage: String::new(),
+            judge_rationale: String::new(),
+            judged_at: None,
+            occurred_at: None,
+            client_sent_at: None,
+            queue_only: false,
+        };
+
+        let out = submit_or_spool_shadow_bout(&client, &scope, bout)
+            .await
+            .expect("404 from older server should spool instead of failing");
+        assert!(out.spooled);
+        assert_eq!(out.bout_key, "sb_404_1");
+
+        let dir = scope.active_spool_dir().unwrap();
+        let count = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".bout"))
+            .count();
+        assert_eq!(count, 1);
+
+        server.abort();
     }
 }

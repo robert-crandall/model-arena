@@ -19,10 +19,11 @@ use crate::arena::{
     CodingLeaderboard, CodingLeaderboardQuery, CodingRunInput, DecideTrialInput, Leaderboard,
     LeaderboardQuery, OverrideCandidateInput, OverrideCandidateResponse, OverrideCodingRunInput,
     OverrideCodingRunResponse, PanelSelection, RecordRunInput, RecordedCodingRunOutput,
-    RecordedRunOutput, ReplaceRosterRequest, RosterListResponse, SelectPanelInput, StartTrialInput,
-    Trial, TrialsListResponse, decide_trial, get_coding_leaderboard, get_leaderboard, list_roster,
-    list_trials, override_candidate, override_coding_run, record_coding_run, record_run,
-    replace_roster, select_panel, start_trial,
+    RecordedRunOutput, RecordedShadowBoutOutput, ReplaceRosterRequest, RosterListResponse,
+    SelectPanelInput, ShadowBoutInput, ShadowLeaderboard, ShadowLeaderboardQuery, StartTrialInput,
+    Trial, TrialsListResponse, decide_trial, get_coding_leaderboard, get_leaderboard,
+    get_shadow_leaderboard, list_roster, list_trials, override_candidate, override_coding_run,
+    record_coding_run, record_run, record_shadow_bout, replace_roster, select_panel, start_trial,
 };
 use crate::auth::{
     ApiToken, AuthenticatedUser, CreatedApiToken, SESSION_COOKIE_NAME, SessionUser, User,
@@ -208,6 +209,8 @@ pub fn build_openapi_router() -> OpenApiRouter<AppState> {
         .routes(routes!(record_coding_run_handler))
         .routes(routes!(override_coding_run_handler))
         .routes(routes!(get_coding_leaderboard_handler))
+        .routes(routes!(record_shadow_bout_handler))
+        .routes(routes!(get_shadow_leaderboard_handler))
 }
 
 pub fn openapi_spec() -> utoipa::openapi::OpenApi {
@@ -934,5 +937,53 @@ async fn get_coding_leaderboard_handler(
     Query(query): Query<CodingLeaderboardQuery>,
 ) -> Result<Json<CodingLeaderboard>, ApiError> {
     let lb = get_coding_leaderboard(&state.pool, user.id, query).await?;
+    Ok(Json(lb))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/shadow-bouts",
+    tag = "arena",
+    request_body = ShadowBoutInput,
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Recorded paired Champion vs Challenger shadow bout idempotently by boutKey", body = RecordedShadowBoutOutput),
+        (status = 400, description = "Invalid shadow bout payload", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn record_shadow_bout_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Json(payload): Json<ShadowBoutInput>,
+) -> Result<Json<RecordedShadowBoutOutput>, ApiError> {
+    let out = record_shadow_bout(&state.pool, user.id, payload).await?;
+    Ok(Json(out))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/shadow-leaderboard",
+    tag = "arena",
+    params(ShadowLeaderboardQuery),
+    security(
+        ("sessionCookie" = []),
+        ("bearerToken" = [])
+    ),
+    responses(
+        (status = 200, description = "Paired coding and orchestration shadow bout scorecards, head-to-head pairs, and recent bouts", body = ShadowLeaderboard),
+        (status = 400, description = "Invalid filter parameters", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody)
+    )
+)]
+async fn get_shadow_leaderboard_handler(
+    State(state): State<AppState>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Query(query): Query<ShadowLeaderboardQuery>,
+) -> Result<Json<ShadowLeaderboard>, ApiError> {
+    let lb = get_shadow_leaderboard(&state.pool, user.id, query).await?;
     Ok(Json(lb))
 }

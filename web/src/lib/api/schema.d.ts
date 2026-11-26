@@ -228,6 +228,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/shadow-bouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["record_shadow_bout_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/shadow-leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_shadow_leaderboard_handler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tokens": {
         parameters: {
             query?: never;
@@ -761,6 +793,13 @@ export interface components {
             runKey: string;
             spooled?: boolean;
         };
+        RecordedShadowBoutOutput: {
+            /** Format: int64 */
+            boutId: number;
+            boutKey: string;
+            spooled: boolean;
+            winner: string;
+        };
         RegisterRequest: {
             email: string;
             name?: string | null;
@@ -871,6 +910,205 @@ export interface components {
             hostModel?: string | null;
             /** @description Skill to select a panel for: adversarial-review or plan-tournament. */
             skill: string;
+        };
+        ShadowBoutInput: {
+            baseSha?: string;
+            /** @description Stable idempotency key for this paired shadow bout. */
+            boutKey: string;
+            challenger: components["schemas"]["ShadowBoutSideInput"];
+            champion: components["schemas"]["ShadowBoutSideInput"];
+            /**
+             * Format: int32
+             * @description Number of human steering turns on the Champion side (0 for headless).
+             */
+            championHumanTurns?: number;
+            /** @description Whether Champion ran headlessly from baseSha or was imported from an existing ref/PR. */
+            championSource?: string;
+            /** Format: date-time */
+            clientSentAt?: string | null;
+            judgeLineage?: string;
+            judgeModel?: string;
+            judgeRationale?: string;
+            /** Format: date-time */
+            judgedAt?: string | null;
+            matrix?: components["schemas"]["ShadowBoutMatrixInput"];
+            /** Format: date-time */
+            occurredAt?: string | null;
+            promptSha256?: string;
+            queueOnly?: boolean;
+            repo?: string;
+            taskKind?: string;
+            taskRef?: string;
+            /** @description Evaluation track: coding or orchestration. */
+            track: string;
+            /** @description Blinded judgment winner: empty (unjudged), champion, challenger, tie, or both_failed. */
+            winner?: string;
+        };
+        ShadowBoutMatrixInput: {
+            challengerImplChallengerTest?: string;
+            challengerImplChampionTest?: string;
+            championImplChallengerTest?: string;
+            championImplChampionTest?: string;
+        };
+        ShadowBoutSideInput: {
+            /** Format: int64 */
+            durationMs?: number;
+            /** Format: int32 */
+            filesChanged?: number;
+            /** Format: int64 */
+            inputTokens?: number;
+            /** @description Optional lineage override (inferred from model prefix when omitted). */
+            lineage?: string;
+            /** Format: int32 */
+            locAdded?: number;
+            /** Format: int32 */
+            locDeleted?: number;
+            /** @description Extensible trace and usage metadata object. */
+            metrics?: unknown;
+            /** @description Executed model ID for this side. */
+            model: string;
+            /**
+             * Format: int64
+             * @description Total AI credits consumed in nano-AIU (1 AI credit = 1_000_000_000).
+             */
+            nanoAiu?: number;
+            /** Format: int64 */
+            outputTokens?: number;
+            /** Format: double */
+            premiumRequests?: number;
+            /** @enum {string} */
+            reasoningEffort?: "" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+            /** @description Side execution status: ok, timeout, credit_cap, failed, or imported. */
+            status?: string;
+            /** Format: int32 */
+            subagentSpawns?: number;
+            /** Format: int32 */
+            testsDelta?: number;
+            /** Format: int32 */
+            toolErrors?: number;
+            /** Format: int32 */
+            turnCount?: number;
+            usageAvailable?: boolean;
+        };
+        ShadowBoutSideView: {
+            /** Format: double */
+            credits: number;
+            /** Format: int64 */
+            durationMs: number;
+            /** Format: int32 */
+            filesChanged: number;
+            /** Format: int64 */
+            inputTokens: number;
+            lineage: string;
+            /** Format: int32 */
+            locAdded: number;
+            /** Format: int32 */
+            locDeleted: number;
+            model: string;
+            /** Format: int64 */
+            nanoAiu: number;
+            /** Format: int64 */
+            outputTokens: number;
+            /** Format: double */
+            premiumRequests: number;
+            reasoningEffort?: string;
+            side: string;
+            status: string;
+            /** Format: int32 */
+            subagentSpawns: number;
+            /** Format: int32 */
+            testsDelta: number;
+            /** Format: int32 */
+            toolErrors: number;
+            /** Format: int32 */
+            turnCount: number;
+            usageAvailable: boolean;
+        };
+        ShadowBoutView: {
+            baseSha: string;
+            boutKey: string;
+            challenger: components["schemas"]["ShadowBoutSideView"];
+            champion: components["schemas"]["ShadowBoutSideView"];
+            /** Format: int32 */
+            championHumanTurns: number;
+            championSource: string;
+            /** Format: int64 */
+            id: number;
+            judgeLineage: string;
+            judgeModel: string;
+            judgeRationale: string;
+            /** Format: date-time */
+            judgedAt?: string | null;
+            matrix: components["schemas"]["ShadowBoutMatrixInput"];
+            /** Format: date-time */
+            occurredAt: string;
+            repo: string;
+            taskKind: string;
+            taskRef: string;
+            track: string;
+            winner: string;
+        };
+        ShadowLeaderboard: {
+            /** Format: int32 */
+            judgedBouts: number;
+            models: components["schemas"]["ShadowModelScorecard"][];
+            pairs: components["schemas"]["ShadowPairwiseRecord"][];
+            recentBouts: components["schemas"]["ShadowBoutView"][];
+            /** Format: int32 */
+            totalBouts: number;
+            /** Format: int32 */
+            windowDays: number;
+        };
+        ShadowModelScorecard: {
+            /** Format: int32 */
+            avgLocChurn: number;
+            /** Format: double */
+            avgSubagentSpawns: number;
+            /** Format: double */
+            avgToolErrors: number;
+            /** Format: double */
+            avgTurns: number;
+            /** Format: int32 */
+            bothFailed: number;
+            /** Format: int32 */
+            bouts: number;
+            /** Format: int32 */
+            judgedBouts: number;
+            lineage: string;
+            /** Format: int32 */
+            losses: number;
+            /** Format: double */
+            medianCredits: number;
+            model: string;
+            /** Format: double */
+            ownTestPassRate: number;
+            /** Format: int64 */
+            p50DurationMs: number;
+            reasoningEffort?: string;
+            /** Format: int32 */
+            ties: number;
+            track: string;
+            /** Format: double */
+            winRate: number;
+            /** Format: int32 */
+            wins: number;
+        };
+        ShadowPairwiseRecord: {
+            /** Format: int32 */
+            aWins: number;
+            /** Format: int32 */
+            bWins: number;
+            /** Format: int32 */
+            bothFailed: number;
+            /** Format: int32 */
+            bouts: number;
+            effortA?: string;
+            effortB?: string;
+            modelA: string;
+            modelB: string;
+            /** Format: int32 */
+            ties: number;
+            track: string;
         };
         StartTrialInput: {
             allowPrDiff?: boolean;
@@ -1554,6 +1792,99 @@ export interface operations {
                 };
             };
             /** @description Invalid run payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    record_shadow_bout_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShadowBoutInput"];
+            };
+        };
+        responses: {
+            /** @description Recorded paired Champion vs Challenger shadow bout idempotently by boutKey */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordedShadowBoutOutput"];
+                };
+            };
+            /** @description Invalid shadow bout payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not signed in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_shadow_leaderboard_handler: {
+        parameters: {
+            query?: {
+                /** @description Lookback window in days (1..=3650, defaults to 90). */
+                days?: number | null;
+                /** @description Optional track filter: coding or orchestration. */
+                track?: string | null;
+                /** @description Optional champion source filter: headless or existing_ref. */
+                championSource?: string | null;
+                /** @description Optional owner/repo filter. */
+                repo?: string | null;
+                /** @description Optional RFC3339 lower bound timestamp (overrides days). */
+                from?: string | null;
+                /** @description Optional RFC3339 upper bound timestamp. */
+                to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paired coding and orchestration shadow bout scorecards, head-to-head pairs, and recent bouts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShadowLeaderboard"];
+                };
+            };
+            /** @description Invalid filter parameters */
             400: {
                 headers: {
                     [name: string]: unknown;
