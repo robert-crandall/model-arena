@@ -2809,7 +2809,22 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
     assert_eq!(r1["boutKey"], "sb_coding_1");
     assert_eq!(r1["winner"], "");
 
-    // 2. Submit blinded judgment via the same idempotent upsert endpoint.
+    // 2. Submit blinded judgment via the same idempotent upsert endpoint and verify timestamps stay stable.
+    let initial_lb: Value = client
+        .get(format!(
+            "{base_url}/api/shadow-leaderboard?days=90&track=coding"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let initial_occurred_at = initial_lb["recentBouts"][0]["occurredAt"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
     let mut judged_payload = base_payload.clone();
     judged_payload["winner"] = json!("challenger");
     judged_payload["judgeModel"] = json!("gemini-4-carbon");
@@ -2826,6 +2841,55 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
         .unwrap();
     assert_eq!(r2["boutId"], r1["boutId"]);
     assert_eq!(r2["winner"], "challenger");
+
+    let judged_lb: Value = client
+        .get(format!(
+            "{base_url}/api/shadow-leaderboard?days=90&track=coding"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let recorded_judged_at = judged_lb["recentBouts"][0]["judgedAt"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        judged_lb["recentBouts"][0]["occurredAt"].as_str().unwrap(),
+        initial_occurred_at
+    );
+
+    // 2b. Exact retry with omitted judgedAt/occurredAt must preserve both stored timestamps.
+    let r2_retry: Value = client
+        .post(format!("{base_url}/api/shadow-bouts"))
+        .json(&judged_payload)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r2_retry["winner"], "challenger");
+    let retry_lb: Value = client
+        .get(format!(
+            "{base_url}/api/shadow-leaderboard?days=90&track=coding"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        retry_lb["recentBouts"][0]["occurredAt"].as_str().unwrap(),
+        initial_occurred_at
+    );
+    assert_eq!(
+        retry_lb["recentBouts"][0]["judgedAt"].as_str().unwrap(),
+        recorded_judged_at
+    );
 
     // 3. Replaying an unjudged payload (even with newer clientSentAt) must NOT wipe the recorded winner.
     let mut unjudged_replay = base_payload.clone();

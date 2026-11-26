@@ -320,7 +320,7 @@ impl AppMcp {
     }
 
     #[tool(
-        description = "Record a paired Champion vs Challenger coding or orchestration shadow bout idempotently, spooling locally as a .bout file if unreachable."
+        description = "Record or update a paired Champion vs Challenger coding or orchestration shadow bout idempotently (full-record upsert; spooling locally as a .bout file if unreachable)."
     )]
     async fn record_shadow_bout(
         &self,

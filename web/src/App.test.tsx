@@ -229,7 +229,25 @@ describe("Model Arena SPA foundation", () => {
       }
 
       if (url.pathname === "/api/shadow-leaderboard" && method === "GET") {
-        return jsonResponse(shadowLeaderboardData);
+        const track = url.searchParams.get("track");
+        const source = url.searchParams.get("championSource");
+        const filteredBouts = shadowLeaderboardData.recentBouts.filter(
+          (b) => (!track || b.track === track) && (!source || b.championSource === source),
+        );
+        const filteredModels = shadowLeaderboardData.models.filter(
+          (m) => (!track || m.track === track) && filteredBouts.length > 0,
+        );
+        const filteredPairs = shadowLeaderboardData.pairs.filter(
+          (p) => (!track || p.track === track) && filteredBouts.length > 0,
+        );
+        return jsonResponse({
+          ...shadowLeaderboardData,
+          totalBouts: filteredBouts.length,
+          judgedBouts: filteredBouts.filter((b) => b.winner !== "").length,
+          models: filteredModels,
+          pairs: filteredPairs,
+          recentBouts: filteredBouts,
+        });
       }
 
       return jsonResponse({ error: `unhandled ${method} ${url.pathname}` }, 404);
@@ -934,8 +952,9 @@ describe("Model Arena SPA foundation", () => {
       host.querySelectorAll<HTMLButtonElement>(".arena-panel .tab-btn"),
     ).find((btn) => btn.textContent?.trim() === "Coding")!;
     codingTrackBtn.click();
-    flush();
-    expect(host.textContent).toContain("No shadow bouts recorded for this filter yet.");
+    await waitFor(() => {
+      expect(host.textContent).toContain("No shadow bouts recorded for this filter yet.");
+    });
 
     const trialsTab = tabs.find((btn) =>
       btn.textContent?.includes("Challenger Trials"),

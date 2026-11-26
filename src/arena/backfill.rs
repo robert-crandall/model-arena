@@ -50,13 +50,24 @@ fn is_shadow_bout_session(session_dir: &Path) -> bool {
     let Ok(raw) = fs::read_to_string(session_dir.join("workspace.yaml")) else {
         return false;
     };
-    raw.lines().any(|line| {
+    let mut lines = raw.lines().peekable();
+    while let Some(line) = lines.next() {
         let Some(rest) = line.trim().strip_prefix("name:") else {
-            return false;
+            continue;
         };
         let val = rest.trim().trim_matches(|c| c == '"' || c == '\'');
-        val.starts_with("shadow-bout:")
-    })
+        if val.starts_with("shadow-bout:") {
+            return true;
+        }
+        if matches!(val, "|" | "|-" | "|+" | ">" | ">-" | ">+")
+            && let Some(next_line) = lines.peek()
+            && next_line.starts_with([' ', '\t'])
+            && next_line.trim().starts_with("shadow-bout:")
+        {
+            return true;
+        }
+    }
+    false
 }
 
 pub async fn run_backfill(
@@ -1626,6 +1637,13 @@ mod tests {
         fs::write(
             dir.path().join("workspace.yaml"),
             "id: abc\nname: \"shadow-bout:sb_123:challenger\"\n",
+        )
+        .unwrap();
+        assert!(is_shadow_bout_session(dir.path()));
+
+        fs::write(
+            dir.path().join("workspace.yaml"),
+            "id: abc\nname: |-\n  shadow-bout:sb_456:champion\n",
         )
         .unwrap();
         assert!(is_shadow_bout_session(dir.path()));

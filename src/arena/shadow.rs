@@ -465,9 +465,6 @@ pub fn validate_and_normalize_shadow_bout_input(
         };
     }
     input.judge_rationale = input.judge_rationale.trim().to_string();
-    if !input.winner.is_empty() && input.judged_at.is_none() {
-        input.judged_at = Some(Utc::now());
-    }
     Ok(())
 }
 
@@ -532,7 +529,7 @@ pub async fn record_shadow_bout(
     mut input: ShadowBoutInput,
 ) -> Result<RecordedShadowBoutOutput, ApiError> {
     validate_and_normalize_shadow_bout_input(&mut input)?;
-    let occurred_at = input.occurred_at.unwrap_or_else(Utc::now);
+    let now = Utc::now();
 
     let mut tx = pool.begin().await.map_err(|err| {
         tracing::error!(?err, "failed to begin shadow bout transaction");
@@ -565,6 +562,7 @@ pub async fn record_shadow_bout(
             if incoming_is_stale {
                 // Never clobber newer execution data, but still accept a missing judgment.
                 if prev.winner.is_empty() && !input.winner.is_empty() {
+                    let judged_at = input.judged_at.unwrap_or(now);
                     sqlx::query(
                         "UPDATE arena_shadow_bouts
                          SET winner = $2, judge_model = $3, judge_lineage = $4,
@@ -576,7 +574,7 @@ pub async fn record_shadow_bout(
                     .bind(&input.judge_model)
                     .bind(&input.judge_lineage)
                     .bind(&input.judge_rationale)
-                    .bind(input.judged_at)
+                    .bind(judged_at)
                     .execute(&mut *tx)
                     .await
                     .map_err(|err| {
@@ -588,7 +586,8 @@ pub async fn record_shadow_bout(
                     (prev.id, prev.winner)
                 }
             } else {
-                // Never overwrite a recorded judgment with an empty winner on replay.
+                // Never overwrite a recorded judgment with an empty winner on replay, and keep
+                // prev.judged_at stable on exact replays when judgedAt is omitted.
                 let (winner, judge_model, judge_lineage, judge_rationale, judged_at) =
                     if input.winner.is_empty() && !prev.winner.is_empty() {
                         (
@@ -599,12 +598,25 @@ pub async fn record_shadow_bout(
                             prev.judged_at,
                         )
                     } else {
+                        let judgment_changed = input.winner != prev.winner
+                            || input.judge_model != prev.judge_model
+                            || input.judge_lineage != prev.judge_lineage
+                            || input.judge_rationale != prev.judge_rationale;
+                        let effective_judged_at = if input.winner.is_empty() {
+                            None
+                        } else if let Some(explicit) = input.judged_at {
+                            Some(explicit)
+                        } else if !judgment_changed && prev.judged_at.is_some() {
+                            prev.judged_at
+                        } else {
+                            Some(now)
+                        };
                         (
                             input.winner.clone(),
                             input.judge_model.clone(),
                             input.judge_lineage.clone(),
                             input.judge_rationale.clone(),
-                            input.judged_at,
+                            effective_judged_at,
                         )
                     };
 
@@ -627,7 +639,7 @@ pub async fn record_shadow_bout(
                          judge_lineage = $16,
                          judge_rationale = $17,
                          judged_at = $18,
-                         occurred_at = $19,
+                         occurred_at = COALESCE($19, occurred_at),
                          recorded_at = NOW(),
                          client_sent_at = COALESCE($20, client_sent_at)
                      WHERE id = $1",
@@ -650,7 +662,7 @@ pub async fn record_shadow_bout(
                 .bind(&judge_lineage)
                 .bind(&judge_rationale)
                 .bind(judged_at)
-                .bind(occurred_at)
+                .bind(input.occurred_at)
                 .bind(input.client_sent_at)
                 .execute(&mut *tx)
                 .await
@@ -674,6 +686,12 @@ pub async fn record_shadow_bout(
             }
         }
         None => {
+            let occurred_at = input.occurred_at.unwrap_or(now);
+            let judged_at = if input.winner.is_empty() {
+                None
+            } else {
+                Some(input.judged_at.unwrap_or(now))
+            };
             let new_id: i64 = sqlx::query_scalar(
                 "INSERT INTO arena_shadow_bouts (
                     user_id, bout_key, track, champion_source, champion_human_turns,
@@ -710,7 +728,7 @@ pub async fn record_shadow_bout(
             .bind(&input.judge_model)
             .bind(&input.judge_lineage)
             .bind(&input.judge_rationale)
-            .bind(input.judged_at)
+            .bind(judged_at)
             .bind(occurred_at)
             .bind(input.client_sent_at)
             .fetch_one(&mut *tx)
@@ -1248,7 +1266,6 @@ mod tests {
         assert_eq!(bout.champion.lineage, "anthropic");
         assert_eq!(bout.challenger.lineage, "openai");
         assert_eq!(bout.judge_lineage, "google");
-        assert!(bout.judged_at.is_some());
 
         let mut bad_track = sample_bout("sb_2", "");
         bad_track.track = "review".to_string();

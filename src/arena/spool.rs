@@ -488,6 +488,9 @@ pub fn write_spool_shadow_bout(
 
     let sent_at = input.client_sent_at.unwrap_or_else(Utc::now);
     input.client_sent_at = Some(sent_at);
+    if input.occurred_at.is_none() {
+        input.occurred_at = Some(sent_at);
+    }
     input.queue_only = false;
 
     let sent_nanos = sent_at.timestamp_nanos_opt().unwrap_or(0);
@@ -641,13 +644,18 @@ pub async fn flush_spool(client: &ApiClient, scope: &SpoolScope) -> FlushSummary
                     let _ = fs::remove_file(&claim_path);
                     summary.flushed += 1;
                 }
+                Err(crate::apiclient::ApiClientError::Status { status: 404, .. }) => {
+                    // Older server without /api/shadow-bouts: keep .bout queued rather than rejecting it.
+                    restore_claim_without_overwrite(&claim_path, &full_path);
+                    summary.pending += 1;
+                }
                 Err(err) if err.is_permanent_client_rejection() => {
                     let _ = fs::rename(&claim_path, dir.join(format!("{name}.rejected")));
                     summary.rejected += 1;
                 }
                 Err(_) => {
                     restore_claim_without_overwrite(&claim_path, &full_path);
-                    summary.pending = names.len() - i;
+                    summary.pending += names.len() - i;
                     return summary;
                 }
             }

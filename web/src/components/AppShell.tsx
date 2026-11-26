@@ -34,6 +34,7 @@ type ArenaTab =
   | "history";
 
 type ShadowTrackFilter = "all" | "coding" | "orchestration";
+type ShadowSourceFilter = "all" | "headless" | "existing_ref";
 
 function formatPct(val: number): string {
   return `${(val * 100).toFixed(1)}%`;
@@ -70,6 +71,8 @@ export function AppShell(props: { user: User }) {
     null,
   );
   const [shadowTrack, setShadowTrack] = createSignal<ShadowTrackFilter>("all");
+  const [shadowSource, setShadowSource] =
+    createSignal<ShadowSourceFilter>("all");
   const [shadowError, setShadowError] = createSignal<string | null>(null);
 
 
@@ -84,15 +87,57 @@ export function AppShell(props: { user: User }) {
   const [creating, setCreating] = createSignal(false);
   let tokenLoadSeq = 0;
   let arenaLoadSeq = 0;
+  let shadowLoadSeq = 0;
+
+  async function loadShadowData(
+    days = daysWindow(),
+    repo = repoFilter(),
+    track = shadowTrack(),
+    source = shadowSource(),
+  ) {
+    const seq = ++shadowLoadSeq;
+    setShadowError(null);
+    const trimmedRepo = repo.trim() || undefined;
+    try {
+      const res = await api.GET("/api/shadow-leaderboard", {
+        params: {
+          query: {
+            days,
+            repo: trimmedRepo,
+            track: track === "all" ? undefined : track,
+            championSource: source === "all" ? undefined : source,
+          },
+        },
+      });
+      if (seq !== shadowLoadSeq) return;
+      if (res.error || !res.data) {
+        setShadowBoard(null);
+        setShadowError(
+          res.error?.error ?? "Could not load shadow bout telemetry.",
+        );
+        return;
+      }
+      setShadowBoard(res.data);
+    } catch {
+      if (seq !== shadowLoadSeq) return;
+      setShadowBoard(null);
+      setShadowError("Could not load shadow bout telemetry.");
+    }
+  }
 
   async function loadArenaData(days = daysWindow(), repo = repoFilter()) {
     const seq = ++arenaLoadSeq;
     setArenaLoading(true);
     setArenaError(null);
-    setShadowError(null);
     const trimmedRepo = repo.trim() || undefined;
+    const shadowPromise = loadShadowData(
+      days,
+      repo,
+      shadowTrack(),
+      shadowSource(),
+    );
     try {
-      const [lbRes, codingRes, shadowRes] = await Promise.all([
+      const [lbRes, codingRes] = await Promise.all([
         api.GET("/api/leaderboard", {
           params: {
             query: {
@@ -109,22 +154,12 @@ export function AppShell(props: { user: User }) {
             },
           },
         }),
-        api
-          .GET("/api/shadow-leaderboard", {
-            params: {
-              query: {
-                days,
-                repo: trimmedRepo,
-              },
-            },
-          })
-          .catch(() => ({ data: undefined, error: { error: "Could not load shadow bouts." } })),
       ]);
+      await shadowPromise;
       if (seq !== arenaLoadSeq) return;
       if (lbRes.error || !lbRes.data) {
         setLeaderboard(null);
         setCodingBoard(null);
-        setShadowBoard(null);
         setArenaError(
           lbRes.error?.error ?? "Could not load leaderboard telemetry.",
         );
@@ -133,7 +168,6 @@ export function AppShell(props: { user: User }) {
       if (codingRes.error || !codingRes.data) {
         setLeaderboard(null);
         setCodingBoard(null);
-        setShadowBoard(null);
         setArenaError(
           codingRes.error?.error ??
             "Could not load coding profile leaderboard.",
@@ -142,19 +176,10 @@ export function AppShell(props: { user: User }) {
       }
       setLeaderboard(lbRes.data);
       setCodingBoard(codingRes.data);
-      if (shadowRes.error || !shadowRes.data) {
-        setShadowBoard(null);
-        setShadowError(
-          shadowRes.error?.error ?? "Could not load shadow bout telemetry.",
-        );
-      } else {
-        setShadowBoard(shadowRes.data);
-      }
     } catch {
       if (seq !== arenaLoadSeq) return;
       setLeaderboard(null);
       setCodingBoard(null);
-      setShadowBoard(null);
       setArenaError("Could not reach the server to load arena telemetry.");
     } finally {
       if (seq === arenaLoadSeq) {
@@ -179,26 +204,27 @@ export function AppShell(props: { user: User }) {
     ),
   );
 
-  const shadowModels = createMemo<ShadowModelScorecard[]>(() => {
-    const track = shadowTrack();
-    return (shadowBoard()?.models ?? []).filter(
-      (m) => track === "all" || m.track === track,
-    );
-  });
+  const shadowModels = createMemo<ShadowModelScorecard[]>(
+    () => shadowBoard()?.models ?? [],
+  );
 
-  const shadowPairs = createMemo<ShadowPairwiseRecord[]>(() => {
-    const track = shadowTrack();
-    return (shadowBoard()?.pairs ?? []).filter(
-      (p) => track === "all" || p.track === track,
-    );
-  });
+  const shadowPairs = createMemo<ShadowPairwiseRecord[]>(
+    () => shadowBoard()?.pairs ?? [],
+  );
 
-  const shadowRecentBouts = createMemo<ShadowBoutView[]>(() => {
-    const track = shadowTrack();
-    return (shadowBoard()?.recentBouts ?? []).filter(
-      (b) => track === "all" || b.track === track,
-    );
-  });
+  const shadowRecentBouts = createMemo<ShadowBoutView[]>(
+    () => shadowBoard()?.recentBouts ?? [],
+  );
+
+  function handleShadowTrackChange(next: ShadowTrackFilter) {
+    setShadowTrack(next);
+    void loadShadowData(daysWindow(), repoFilter(), next, shadowSource());
+  }
+
+  function handleShadowSourceChange(next: ShadowSourceFilter) {
+    setShadowSource(next);
+    void loadShadowData(daysWindow(), repoFilter(), shadowTrack(), next);
+  }
 
 
   async function handleLogout() {
@@ -713,14 +739,14 @@ export function AppShell(props: { user: User }) {
                     <button
                       type="button"
                       class={["tab-btn", { active: shadowTrack() === "all" }]}
-                      onClick={() => setShadowTrack("all")}
+                      onClick={() => handleShadowTrackChange("all")}
                     >
                       All tracks
                     </button>
                     <button
                       type="button"
                       class={["tab-btn", { active: shadowTrack() === "coding" }]}
-                      onClick={() => setShadowTrack("coding")}
+                      onClick={() => handleShadowTrackChange("coding")}
                     >
                       Coding
                     </button>
@@ -730,10 +756,24 @@ export function AppShell(props: { user: User }) {
                         "tab-btn",
                         { active: shadowTrack() === "orchestration" },
                       ]}
-                      onClick={() => setShadowTrack("orchestration")}
+                      onClick={() => handleShadowTrackChange("orchestration")}
                     >
                       Orchestration
                     </button>
+                    <select
+                      aria-label="Champion source filter"
+                      class="select"
+                      value={shadowSource()}
+                      onChange={(e) =>
+                        handleShadowSourceChange(
+                          e.currentTarget.value as ShadowSourceFilter,
+                        )
+                      }
+                    >
+                      <option value="all">All sources</option>
+                      <option value="headless">Headless pairs only</option>
+                      <option value="existing_ref">Existing PR/ref replays</option>
+                    </select>
                   </div>
                 </div>
 
