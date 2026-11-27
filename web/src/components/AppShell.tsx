@@ -373,7 +373,7 @@ export function AppShell(props: { user: User }) {
                 subagent review catch rates, latency percentiles, de-biased plan
                 tournament win rates, Challenger bout progress, and single-model
                 coding profiles. Roster and trial mutations stay in{" "}
-                <code>model-arena-rust-mcp</code>.
+                <code>model-arena-mcp</code>.
               </p>
             </div>
 
@@ -726,7 +726,7 @@ export function AppShell(props: { user: User }) {
                       Head-to-head Champion vs Challenger runs on the exact same
                       base commit and prompt. Recorded via{" "}
                       <code>shadow-bout</code> and{" "}
-                      <code>model-arena-rust-mcp</code>.
+                      <code>model-arena-mcp</code>.
                     </p>
                   </div>
                   <div class="arena-tabs" role="group" aria-label="Shadow bout track">
@@ -954,7 +954,7 @@ export function AppShell(props: { user: User }) {
                 <p class="field-hint">
                   Speed- and quality-weighed trial verdicts. Promotions and
                   retirements are executed exclusively via{" "}
-                  <code>model-arena-rust-mcp</code>.
+                  <code>model-arena-mcp</code>.
                 </p>
                 <Show
                   when={(leaderboard()?.trials ?? []).length > 0}
@@ -1217,14 +1217,14 @@ export function AppShell(props: { user: User }) {
           <summary>
             <span>AI &amp; API access</span>
             <span class="disclosure-hint">
-              Personal access tokens for model-arena-rust-mcp
+              Personal access tokens for model-arena-mcp
             </span>
           </summary>
 
           <div class="disclosure-body">
             <p class="lead-copy">
               Run <code>make mcp-token</code> on your workstation or mint a
-              personal access token below for <code>model-arena-rust-mcp</code>.
+              personal access token below for <code>model-arena-mcp</code>.
             </p>
 
             <Show when={tokenError()}>

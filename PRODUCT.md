@@ -1,4 +1,4 @@
-# Model Arena (`model-arena-rust`)
+# Model Arena (`model-arena`)
 
 Empirical AI model performance tracker, panel selector, and Challenger trial harness for multi-agent skills (`adversarial-review` and `plan-tournament`) and single-model coding PR profiles (`#5`), built on **Rust 2024 + Axum 0.8 + PostgreSQL 18 + `rmcp` stdio MCP + Solid 2.0**.
 

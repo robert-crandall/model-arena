@@ -25,9 +25,9 @@ COPY src ./src
 COPY --from=web-build /src/web/build ./web/build
 
 RUN mkdir -p /out \
-    && cargo build --locked --release --bin model-arena-rust \
-    && strip target/release/model-arena-rust \
-    && cp target/release/model-arena-rust /out/app
+    && cargo build --locked --release --bin model-arena \
+    && strip target/release/model-arena \
+    && cp target/release/model-arena /out/app
 
 # --- 3. Distroless nonroot runtime ---
 FROM gcr.io/distroless/cc-debian12:nonroot

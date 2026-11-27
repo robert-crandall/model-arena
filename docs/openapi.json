@@ -4084,7 +4084,7 @@
       "sessionCookie": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "model_arena_rust_session"
+        "name": "model_arena_session"
       }
     }
   },

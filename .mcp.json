@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "model-arena-rust": { "command": "model-arena-rust-mcp", "args": ["serve"] }
+    "model-arena": { "command": "model-arena-mcp", "args": ["serve"] }
   }
 }

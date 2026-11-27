@@ -1,13 +1,13 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in `robert-crandall/model-arena-rust`.
+Guidance for AI coding agents working in `robert-crandall/model-arena`.
 
 ## Overview
 
-`model-arena-rust` is a self-hosted homelab web application and local `stdio` MCP server starter built on **Rust + Solid 2.0**.
+`model-arena` is a self-hosted homelab web application and local `stdio` MCP server starter built on **Rust + Solid 2.0**.
 
 - **Backend**: Rust 2024 (`1.95+`), Axum `0.8`, SQLx `0.8` (PostgreSQL 18), `utoipa` + `utoipa-axum` (OpenAPI 3.1), Argon2id sessions + `pat_` personal access tokens, `rust-embed` SPA serving.
-- **MCP server**: `model-arena-rust-mcp` (`rmcp` over local `stdio`), talking to the HTTP API using `~/.config/model-arena-rust.json` (`MCP_APP_URL` / `MCP_APP_TOKEN` overrides).
+- **MCP server**: `model-arena-mcp` (`rmcp` over local `stdio`), talking to the HTTP API using `~/.config/model-arena.json` (`MCP_APP_URL` / `MCP_APP_TOKEN` overrides).
 - **Frontend**: Solid `2.0` (`solid-js@2.0.0-rc.*`, `@solidjs/web`, `@solidjs/vite-plugin`), Vite `8`, Vitest `5`, Bun `1.3.x`, and `openapi-fetch` + `openapi-typescript`.
 
 ## Household Authentication & Security Model
@@ -58,4 +58,4 @@ Read `web/node_modules/solid-js/CHEATSHEET.md` whenever touching `web/`. Solid 2
 - `make spec` - regenerate `docs/openapi.json` and `web/src/lib/api/schema.d.ts`.
 - `make check` - run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and frontend `tsc --noEmit`.
 - `make test` - run Rust unit + integration tests (`TEST_DATABASE_URL` enables Postgres tests) and frontend Vitest tests.
-- `make install-mcp` / `make mcp-token` / `make mcp-config` - install and configure `model-arena-rust-mcp` for local `stdio` MCP clients.
+- `make install-mcp` / `make mcp-token` / `make mcp-config` - install and configure `model-arena-mcp` for local `stdio` MCP clients.
