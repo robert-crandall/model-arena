@@ -18,32 +18,32 @@ setup: ## First run after cloning: frontend deps, .env, and an initial frontend 
 build: ## Build the Solid 2.0 SPA, then compile the release binary into bin/
 	cd web && bun run build
 	mkdir -p bin
-	cargo build --locked --release --bin model-arena-rust
-	tmp=$$(mktemp "bin/.model-arena-rust.XXXXXX") || exit 1; \
+	cargo build --locked --release --bin model-arena
+	tmp=$$(mktemp "bin/.model-arena.XXXXXX") || exit 1; \
 	trap 'rm -f "$$tmp"' EXIT; \
-	cp target/release/model-arena-rust "$$tmp" && \
+	cp target/release/model-arena "$$tmp" && \
 	chmod 0755 "$$tmp" && \
-	mv -f "$$tmp" bin/model-arena-rust
+	mv -f "$$tmp" bin/model-arena
 
-install-mcp: ## Build and install model-arena-rust-mcp into ~/bin
+install-mcp: ## Build and install model-arena-mcp into ~/bin
 	mkdir -p "$(HOME)/bin"
-	cargo build --locked --release --bin model-arena-rust-mcp
-	tmp=$$(mktemp "$(HOME)/bin/.model-arena-rust-mcp.XXXXXX") || exit 1; \
+	cargo build --locked --release --bin model-arena-mcp
+	tmp=$$(mktemp "$(HOME)/bin/.model-arena-mcp.XXXXXX") || exit 1; \
 	trap 'rm -f "$$tmp"' EXIT; \
-	cp target/release/model-arena-rust-mcp "$$tmp" && \
+	cp target/release/model-arena-mcp "$$tmp" && \
 	chmod 0755 "$$tmp" && \
-	mv -f "$$tmp" "$(HOME)/bin/model-arena-rust-mcp"
-	@echo "installed $(HOME)/bin/model-arena-rust-mcp"
+	mv -f "$$tmp" "$(HOME)/bin/model-arena-mcp"
+	@echo "installed $(HOME)/bin/model-arena-mcp"
 
-mcp-token: ## Sign in and mint an MCP token into ~/.config/model-arena-rust.json
-	cargo run --locked --bin model-arena-rust-mcp -- token
+mcp-token: ## Sign in and mint an MCP token into ~/.config/model-arena.json
+	cargo run --locked --bin model-arena-mcp -- token
 
 mcp-config: ## Print the local stdio MCP client configuration
-	@printf '{\n  "mcpServers": {\n    "model-arena-rust": { "command": "%s/bin/model-arena-rust-mcp", "args": ["serve"] }\n  }\n}\n' \
+	@printf '{\n  "mcpServers": {\n    "model-arena": { "command": "%s/bin/model-arena-mcp", "args": ["serve"] }\n  }\n}\n' \
 		"$(HOME)"
 
 run: ## Run the release binary built by `make build`
-	./bin/model-arena-rust
+	./bin/model-arena
 
 dev: ## Run Vite on :5173 with the Rust API server on :8080
 	@scripts/dev.sh

@@ -64,7 +64,7 @@ fn publish_plan_script_matrix() {
             name: "green push CI at main tip publishes and promotes",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "robert-crandall/model-arena-rust"),
+                ("REPOSITORY", "robert-crandall/model-arena"),
                 ("RUN_EVENT", "push"),
                 ("RUN_CONCLUSION", "success"),
                 ("RUN_HEAD_SHA", sha),
@@ -80,7 +80,7 @@ fn publish_plan_script_matrix() {
             name: "pull_request CI run never publishes even if tip matches",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "robert-crandall/model-arena-rust"),
+                ("REPOSITORY", "robert-crandall/model-arena"),
                 ("RUN_EVENT", "pull_request"),
                 ("RUN_CONCLUSION", "success"),
                 ("RUN_HEAD_SHA", sha),
@@ -96,7 +96,7 @@ fn publish_plan_script_matrix() {
             name: "stale main CI run declines when main moved",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "robert-crandall/model-arena-rust"),
+                ("REPOSITORY", "robert-crandall/model-arena"),
                 ("RUN_EVENT", "push"),
                 ("RUN_CONCLUSION", "success"),
                 ("RUN_HEAD_SHA", sha),
@@ -112,7 +112,7 @@ fn publish_plan_script_matrix() {
             name: "failed CI run declines",
             env: vec![
                 ("EVENT_NAME", "workflow_run"),
-                ("REPOSITORY", "robert-crandall/model-arena-rust"),
+                ("REPOSITORY", "robert-crandall/model-arena"),
                 ("RUN_EVENT", "push"),
                 ("RUN_CONCLUSION", "failure"),
                 ("RUN_HEAD_SHA", sha),
@@ -128,7 +128,7 @@ fn publish_plan_script_matrix() {
             name: "version tag push publishes immutable tag without moving main",
             env: vec![
                 ("EVENT_NAME", "push"),
-                ("REPOSITORY", "robert-crandall/model-arena-rust"),
+                ("REPOSITORY", "robert-crandall/model-arena"),
                 ("GITHUB_REF", "refs/tags/v0.2.0"),
                 ("SHA", sha),
             ],
@@ -142,7 +142,7 @@ fn publish_plan_script_matrix() {
             name: "workflow_dispatch on main publishes and promotes",
             env: vec![
                 ("EVENT_NAME", "workflow_dispatch"),
-                ("REPOSITORY", "robert-crandall/model-arena-rust"),
+                ("REPOSITORY", "robert-crandall/model-arena"),
                 ("GITHUB_REF", "refs/heads/main"),
                 ("SHA", sha),
             ],
@@ -156,7 +156,7 @@ fn publish_plan_script_matrix() {
             name: "workflow_dispatch on feature branch is rejected",
             env: vec![
                 ("EVENT_NAME", "workflow_dispatch"),
-                ("REPOSITORY", "robert-crandall/model-arena-rust"),
+                ("REPOSITORY", "robert-crandall/model-arena"),
                 ("GITHUB_REF", "refs/heads/feature-branch"),
                 ("SHA", sha),
             ],
@@ -190,7 +190,7 @@ fn publish_plan_script_matrix() {
 
         assert_eq!(
             parsed.get("image").copied(),
-            Some("ghcr.io/robert-crandall/model-arena-rust"),
+            Some("ghcr.io/robert-crandall/model-arena"),
             "case '{}': image must be lowercased",
             tc.name
         );
@@ -511,7 +511,7 @@ impl TestDb {
         };
 
         let mut parsed = url::Url::parse(&base_url).expect("parse TEST_DATABASE_URL");
-        let db_name = format!("model_arena_rust_test_{}", Uuid::new_v4().simple());
+        let db_name = format!("model_arena_test_{}", Uuid::new_v4().simple());
 
         let mut admin_conn = PgConnection::connect(parsed.as_str())
             .await
@@ -843,7 +843,7 @@ async fn multi_user_auth_csrf_and_tokens_flow() {
         .next()
         .unwrap()
         .to_string();
-    assert!(set_cookie.starts_with("model_arena_rust_session="));
+    assert!(set_cookie.starts_with("model_arena_session="));
 
     sqlx::query("UPDATE sessions SET expires_at = now() + interval '5 days'")
         .execute(&tdb.pool)
@@ -924,12 +924,12 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         return;
     };
 
-    // Reserve a free port for the compiled `model-arena-rust` server binary
+    // Reserve a free port for the compiled `model-arena` server binary
     let probe = StdTcpListener::bind("127.0.0.1:0").expect("reserve port");
     let addr = probe.local_addr().expect("local addr");
     drop(probe);
 
-    let server_bin = env!("CARGO_BIN_EXE_model-arena-rust");
+    let server_bin = env!("CARGO_BIN_EXE_model-arena");
     let mut server_child = Command::new(server_bin)
         .env("DATABASE_URL", &tdb.db_url)
         .env("ADDR", addr.to_string())
@@ -939,7 +939,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .expect("spawn model-arena-rust binary");
+        .expect("spawn model-arena binary");
 
     let base_url = format!("http://{addr}");
     let http = reqwest::Client::builder()
@@ -959,7 +959,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
     }
     assert!(
         healthy,
-        "model-arena-rust binary did not become healthy on {base_url}"
+        "model-arena binary did not become healthy on {base_url}"
     );
 
     // 1. Embedded Solid 2.0 SPA assets + client-side route fallback + API 404 boundary
@@ -985,16 +985,16 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         .unwrap();
     assert_eq!(api_404.status(), StatusCode::NOT_FOUND);
 
-    // 2. Built-in container healthcheck subcommand (`model-arena-rust healthcheck`)
+    // 2. Built-in container healthcheck subcommand (`model-arena healthcheck`)
     let hc_status = Command::new(server_bin)
         .arg("healthcheck")
         .env("ADDR", addr.to_string())
         .status()
         .await
-        .expect("run model-arena-rust healthcheck");
-    assert!(hc_status.success(), "model-arena-rust healthcheck failed");
+        .expect("run model-arena healthcheck");
+    assert!(hc_status.success(), "model-arena healthcheck failed");
 
-    // 3. Register two household users, mint MCP config (0600), and exercise model-arena-rust-mcp over stdio
+    // 3. Register two household users, mint MCP config (0600), and exercise model-arena-mcp over stdio
     let reg = http
         .post(format!("{base_url}/api/auth/register"))
         .json(&json!({
@@ -1028,9 +1028,8 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
     .await
     .expect("mint token via login");
 
-    let temp_dir =
-        std::env::temp_dir().join(format!("model-arena-rust-mcp-test-{}", Uuid::new_v4()));
-    let cfg_path = temp_dir.join("model-arena-rust.json");
+    let temp_dir = std::env::temp_dir().join(format!("model-arena-mcp-test-{}", Uuid::new_v4()));
+    let cfg_path = temp_dir.join("model-arena.json");
     let cfg = ClientConfig {
         app_url: base_url.clone(),
         token: minted.token.clone(),
@@ -1048,8 +1047,8 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         );
     }
 
-    // Invoke `model-arena-rust-mcp --config <path>` without `serve` to verify default subcommand dispatch
-    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-rust-mcp");
+    // Invoke `model-arena-mcp --config <path>` without `serve` to verify default subcommand dispatch
+    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-mcp");
     let mut mcp_child = Command::new(mcp_bin)
         .arg("--config")
         .arg(&cfg_path)
@@ -1060,7 +1059,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .expect("spawn model-arena-rust-mcp");
+        .expect("spawn model-arena-mcp");
 
     let mut mcp_stdin = mcp_child.stdin.take().unwrap();
     let mut mcp_lines = BufReader::new(mcp_child.stdout.take().unwrap()).lines();
@@ -1089,10 +1088,7 @@ async fn binaries_spa_healthcheck_and_mcp_stdio_end_to_end() {
         .expect("initialize eof");
     let init_resp: Value = serde_json::from_str(&init_line).unwrap();
     assert_eq!(init_resp["id"], 1);
-    assert_eq!(
-        init_resp["result"]["serverInfo"]["name"],
-        "model-arena-rust-mcp"
-    );
+    assert_eq!(init_resp["result"]["serverInfo"]["name"], "model-arena-mcp");
 
     // JSON-RPC notification: notifications/initialized
     let initialized_notif = json!({
@@ -1558,7 +1554,7 @@ async fn arena_runs_overrides_timing_and_leaderboard_flow() {
                 "runKey": format!("ar_champ_{i}"),
                 "skill": "adversarial-review",
                 "artifactKind": "pr_diff",
-                "repo": "robert-crandall/model-arena-rust",
+                "repo": "robert-crandall/model-arena",
                 "hostModel": "gemini-4-argon",
                 "approachVerdict": "keep",
                 "clientSentAt": "2026-04-19T12:00:00Z",
@@ -1592,7 +1588,7 @@ async fn arena_runs_overrides_timing_and_leaderboard_flow() {
             "runKey": "ar_champ_1",
             "skill": "adversarial-review",
             "artifactKind": "pr_diff",
-            "repo": "robert-crandall/model-arena-rust",
+            "repo": "robert-crandall/model-arena",
             "hostModel": "gemini-4-argon",
             "approachVerdict": "rethink",
             "clientSentAt": "2026-04-19T11:00:00Z",
@@ -1647,7 +1643,7 @@ async fn arena_runs_overrides_timing_and_leaderboard_flow() {
             "runKey": "ar_champ_1",
             "skill": "adversarial-review",
             "artifactKind": "pr_diff",
-            "repo": "robert-crandall/model-arena-rust",
+            "repo": "robert-crandall/model-arena",
             "hostModel": "gemini-4-argon",
             "approachVerdict": "keep",
             "clientSentAt": "2026-04-19T12:05:00Z",
@@ -1673,7 +1669,7 @@ async fn arena_runs_overrides_timing_and_leaderboard_flow() {
                 "runKey": format!("ar_chall_{i}"),
                 "skill": "adversarial-review",
                 "artifactKind": "pr_diff",
-                "repo": "robert-crandall/model-arena-rust",
+                "repo": "robert-crandall/model-arena",
                 "hostModel": "gemini-4-argon",
                 "approachVerdict": "keep",
                 "legs": [
@@ -1709,7 +1705,7 @@ async fn arena_runs_overrides_timing_and_leaderboard_flow() {
             "runKey": "pt_1",
             "skill": "plan-tournament",
             "artifactKind": "plan",
-            "repo": "robert-crandall/model-arena-rust",
+            "repo": "robert-crandall/model-arena",
             "hostModel": "gemini-4-argon",
             "winningRole": "minimal_diff",
             "legs": [
@@ -1821,7 +1817,7 @@ async fn arena_coding_runs_overrides_and_coding_leaderboard_flow() {
             "runKey": "pr_model_arena_101",
             "model": "claude-opus-5.5",
             "harness": "copilot-cli",
-            "repo": "robert-crandall/model-arena-rust",
+            "repo": "robert-crandall/model-arena",
             "prNumber": 101,
             "taskKind": "bugfix",
             "locAdded": 20,
@@ -1858,7 +1854,7 @@ async fn arena_coding_runs_overrides_and_coding_leaderboard_flow() {
             "runKey": "pr_model_arena_102",
             "model": "claude-opus-5.5",
             "harness": "t3-code",
-            "repo": "robert-crandall/model-arena-rust",
+            "repo": "robert-crandall/model-arena",
             "prNumber": 102,
             "taskKind": "feature",
             "locAdded": 120,
@@ -2031,7 +2027,7 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
     .expect("mint token");
 
     let temp_dir = tempfile::tempdir().expect("tempdir");
-    let cfg_path = temp_dir.path().join("model-arena-rust.json");
+    let cfg_path = temp_dir.path().join("model-arena.json");
     let live_cfg = ClientConfig {
         app_url: base_url.clone(),
         token: minted.token.clone(),
@@ -2054,8 +2050,8 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
             run_key: "spooled_ar_1".to_string(),
             skill: "adversarial-review".to_string(),
             artifact_kind: "pr_diff".to_string(),
-            artifact_ref: "robert-crandall/model-arena-rust#5".to_string(),
-            repo: "robert-crandall/model-arena-rust".to_string(),
+            artifact_ref: "robert-crandall/model-arena#5".to_string(),
+            repo: "robert-crandall/model-arena".to_string(),
             phase: "independent".to_string(),
             host_model: "gemini-4-argon".to_string(),
             host_reasoning_effort: String::new(),
@@ -2098,7 +2094,7 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
             reasoning_effort: "high".to_string(),
             lineage: String::new(),
             harness: "t3-code".to_string(),
-            repo: "robert-crandall/model-arena-rust".to_string(),
+            repo: "robert-crandall/model-arena".to_string(),
             pr_number: 55,
             issue_ref: String::new(),
             task_kind: "feature".to_string(),
@@ -2135,8 +2131,8 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
     assert_eq!(flush_res.flushed, 2);
     assert_eq!(flush_res.pending, 0);
 
-    // 2. Verify `model-arena-rust-mcp list` exposes all 15 tools
-    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-rust-mcp");
+    // 2. Verify `model-arena-mcp list` exposes all 15 tools
+    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-mcp");
     let list_out = Command::new(mcp_bin)
         .arg("list")
         .arg("--config")
@@ -2188,7 +2184,7 @@ async fn arena_mcp_cli_spool_and_backfill_flow() {
         json!({"type":"tool.execution_start","timestamp":ts(3),"data":{"toolCallId":"pt_b","toolName":"task","arguments":{"name":"planner-b","description":"Clean architecture planner","agent_type":"general-purpose","model":"gpt-6.1-sol"}}}).to_string(),
         json!({"type":"tool.execution_complete","timestamp":ts(22),"data":{"toolCallId":"pt_a","success":true,"result":"plan A"}}).to_string(),
         json!({"type":"tool.execution_complete","timestamp":ts(38),"data":{"toolCallId":"pt_b","success":true,"result":"plan B"}}).to_string(),
-        json!({"type":"assistant.message","timestamp":ts(45),"data":{"content":"### Hybrid Plan\nWinning core plan: Planner A (claude-opus-5.5) on robert-crandall/model-arena-rust#8.\nCherry-picks from gpt-6.1-sol for transaction locking."}}).to_string(),
+        json!({"type":"assistant.message","timestamp":ts(45),"data":{"content":"### Hybrid Plan\nWinning core plan: Planner A (claude-opus-5.5) on robert-crandall/model-arena#8.\nCherry-picks from gpt-6.1-sol for transaction locking."}}).to_string(),
         json!({"type":"user.message","timestamp":ts(300),"data":{"content":"Skip this delegated review"}}).to_string(),
         json!({"type":"tool.execution_start","timestamp":ts(301),"data":{"toolCallId":"skip_1","toolName":"bash","arguments":{"command":"true \"model-arena:skip\""}}}).to_string(),
         json!({"type":"assistant.message","timestamp":ts(310),"data":{"content":"### Adversarial review (gpt-6.1-sol, claude-opus-5.5)\n- **Approach:** `keep`\n- **Findings:** none\n- **Set aside:** none"}}).to_string(),
@@ -2919,7 +2915,7 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
     .await
     .expect("mint token");
     let tmp = tempfile::tempdir().unwrap();
-    let cfg_path = tmp.path().join("model-arena-rust.json");
+    let cfg_path = tmp.path().join("model-arena.json");
     let spool_root = tmp.path().join("spool");
     ClientConfig {
         app_url: base_url.clone(),
@@ -2928,7 +2924,7 @@ async fn arena_shadow_bouts_upsert_judgment_preservation_and_mcp_spool_flow() {
     .write_atomic(&cfg_path)
     .unwrap();
 
-    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-rust-mcp");
+    let mcp_bin = env!("CARGO_BIN_EXE_model-arena-mcp");
     let orch_input = json!({
         "boutKey": "sb_orch_1",
         "track": "orchestration",

@@ -368,7 +368,7 @@ describe("Model Arena SPA foundation", () => {
 
     setInputValue(
       host.querySelector("#new-token-name") as HTMLInputElement,
-      "model-arena-rust-mcp",
+      "model-arena-mcp",
     );
     details
       .querySelector("form")!
@@ -379,7 +379,7 @@ describe("Model Arena SPA foundation", () => {
         "pat_00000000-0000-0000-0000-000000000099_secret_a1b2",
       );
       expect(host.querySelector(".token-name")?.textContent).toBe(
-        "model-arena-rust-mcp",
+        "model-arena-mcp",
       );
     });
 
@@ -739,7 +739,7 @@ describe("Model Arena SPA foundation", () => {
           runKey: "adv-run-10",
           skill: "adversarial-review",
           occurredAt: "2026-04-20T00:00:00Z",
-          repo: "robert-crandall/model-arena-rust",
+          repo: "robert-crandall/model-arena",
           machine: "mbp",
           harness: "copilot-cli",
           hostModel: "gemini-3.1-pro",

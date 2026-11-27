@@ -460,28 +460,28 @@ async fn main() -> ExitCode {
                 &args[..]
             };
             if let Err(err) = run_serve(rest).await {
-                eprintln!("model-arena-rust-mcp error: {err}");
+                eprintln!("model-arena-mcp error: {err}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
         }
         Some("list") => {
             if let Err(err) = run_list(&args[1..]) {
-                eprintln!("model-arena-rust-mcp list error: {err}");
+                eprintln!("model-arena-mcp list error: {err}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
         }
         Some("call") => {
             if let Err(err) = run_call(&args[1..]).await {
-                eprintln!("model-arena-rust-mcp call error: {err}");
+                eprintln!("model-arena-mcp call error: {err}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
         }
         Some("token") => {
             if let Err(err) = run_token(&args[1..]).await {
-                eprintln!("model-arena-rust-mcp token error: {err}");
+                eprintln!("model-arena-mcp token error: {err}");
                 return ExitCode::FAILURE;
             }
             ExitCode::SUCCESS
@@ -501,10 +501,10 @@ async fn main() -> ExitCode {
 fn print_usage() {
     eprintln!(
         "Usage:
-  model-arena-rust-mcp [serve] [--config <path>]
-  model-arena-rust-mcp list [--config <path>]
-  model-arena-rust-mcp call <tool> [--input <json> | --input-file <path>] [--config <path>]
-  model-arena-rust-mcp token [--url <app-url>] [--email <email>] [--name <token-name>] [--config <path>]"
+  model-arena-mcp [serve] [--config <path>]
+  model-arena-mcp list [--config <path>]
+  model-arena-mcp call <tool> [--input <json> | --input-file <path>] [--config <path>]
+  model-arena-mcp token [--url <app-url>] [--email <email>] [--name <token-name>] [--config <path>]"
     );
 }
 

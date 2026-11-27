@@ -11,18 +11,18 @@ if [ ! -f web/build/index.html ]; then
   (cd web && bun run build)
 fi
 
-echo "==> building model-arena-rust server"
-cargo build --bin model-arena-rust
+echo "==> building model-arena server"
+cargo build --bin model-arena
 
-echo "==> starting model-arena-rust server on :8080"
-./target/debug/model-arena-rust &
+echo "==> starting model-arena server on :8080"
+./target/debug/model-arena &
 server_pid=$!
 trap 'kill "$server_pid" 2>/dev/null || true' EXIT
 
 ready=
 for _ in $(seq 1 50); do
   if ! kill -0 "$server_pid" 2>/dev/null; then
-    echo "model-arena-rust server exited during startup - see output above" >&2
+    echo "model-arena server exited during startup - see output above" >&2
     exit 1
   fi
   if curl -fs -o /dev/null http://127.0.0.1:8080/healthz; then
@@ -33,7 +33,7 @@ for _ in $(seq 1 50); do
 done
 
 if [ -z "$ready" ]; then
-  echo "model-arena-rust server never became healthy on :8080 after 10s" >&2
+  echo "model-arena server never became healthy on :8080 after 10s" >&2
   exit 1
 fi
 

@@ -8,7 +8,7 @@
 #
 # Inputs:
 #   EVENT_NAME     github.event_name: workflow_run | push | workflow_dispatch
-#   REPOSITORY     github.repository, e.g. robert-crandall/model-arena-rust
+#   REPOSITORY     github.repository, e.g. robert-crandall/model-arena
 #   GITHUB_REF     github.ref (push and workflow_dispatch paths)
 #   SHA            github.sha (push and workflow_dispatch paths)
 #   RUN_EVENT      github.event.workflow_run.event

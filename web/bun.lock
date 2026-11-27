@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "model-arena-rust-web",
+      "name": "model-arena-web",
       "dependencies": {
         "@solidjs/web": "2.0.0-rc.21",
         "openapi-fetch": "^0.17.0",

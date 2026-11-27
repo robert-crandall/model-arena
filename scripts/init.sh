@@ -23,11 +23,13 @@ CRATE_SLUG="${SLUG//-/_}"
 if [[ "$CRATE_SLUG" =~ ^[0-9] ]]; then
   CRATE_SLUG="_${CRATE_SLUG}"
 fi
+ENV_SLUG="$(printf '%s' "$CRATE_SLUG" | tr '[:lower:]' '[:upper:]')"
 
-OLD_REPO="robert-crandall/model-arena-rust"
+OLD_REPO="robert-crandall/model-arena"
 OLD_NAME="Model Arena"
-OLD_SLUG="model-arena-rust"
-OLD_CRATE="model_arena_rust"
+OLD_SLUG="model-arena"
+OLD_CRATE="model_arena"
+OLD_ENV="MODEL_ARENA"
 
 NEW_REPO="${MODULE#github.com/}"
 
@@ -46,11 +48,13 @@ OLD_REPO="$OLD_REPO" NEW_REPO="$NEW_REPO" \
 OLD_NAME="$OLD_NAME" NAME="$NAME" \
 OLD_SLUG="$OLD_SLUG" SLUG="$SLUG" \
 OLD_CRATE="$OLD_CRATE" CRATE_SLUG="$CRATE_SLUG" \
+OLD_ENV="$OLD_ENV" ENV_SLUG="$ENV_SLUG" \
 perl -i -pe '
   s/\Q$ENV{OLD_REPO}\E/$ENV{NEW_REPO}/gi;
   s/\Q$ENV{OLD_NAME}\E/$ENV{NAME}/g;
   s/\Q$ENV{OLD_SLUG}\E/$ENV{SLUG}/g;
   s/\Q$ENV{OLD_CRATE}\E/$ENV{CRATE_SLUG}/g;
+  s/\Q$ENV{OLD_ENV}\E/$ENV{ENV_SLUG}/g;
 ' "${FILES[@]}"
 
 LEFTOVERS="$(git grep -n -i -E "${OLD_REPO}|${OLD_NAME}|${OLD_SLUG}|${OLD_CRATE}" -- . ':(exclude)scripts/init.sh' ':(exclude)docs/tech-stack.md' || true)"
