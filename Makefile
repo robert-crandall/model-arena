@@ -14,16 +14,25 @@ setup: ## First run after cloning: frontend deps, .env, and an initial frontend 
 	@test -f .env || { cp .env.example .env && echo "wrote .env from .env.example"; }
 	cd web && bun run build
 
+# Stage binaries via mktemp + mv so macOS doesn't reuse a cached vnode code signature on overwrite.
 build: ## Build the Solid 2.0 SPA, then compile the release binary into bin/
 	cd web && bun run build
 	mkdir -p bin
 	cargo build --locked --release --bin model-arena-rust
-	cp target/release/model-arena-rust bin/model-arena-rust
+	tmp=$$(mktemp "bin/.model-arena-rust.XXXXXX") || exit 1; \
+	trap 'rm -f "$$tmp"' EXIT; \
+	cp target/release/model-arena-rust "$$tmp" && \
+	chmod 0755 "$$tmp" && \
+	mv -f "$$tmp" bin/model-arena-rust
 
 install-mcp: ## Build and install model-arena-rust-mcp into ~/bin
 	mkdir -p "$(HOME)/bin"
 	cargo build --locked --release --bin model-arena-rust-mcp
-	cp target/release/model-arena-rust-mcp "$(HOME)/bin/model-arena-rust-mcp"
+	tmp=$$(mktemp "$(HOME)/bin/.model-arena-rust-mcp.XXXXXX") || exit 1; \
+	trap 'rm -f "$$tmp"' EXIT; \
+	cp target/release/model-arena-rust-mcp "$$tmp" && \
+	chmod 0755 "$$tmp" && \
+	mv -f "$$tmp" "$(HOME)/bin/model-arena-rust-mcp"
 	@echo "installed $(HOME)/bin/model-arena-rust-mcp"
 
 mcp-token: ## Sign in and mint an MCP token into ~/.config/model-arena-rust.json
